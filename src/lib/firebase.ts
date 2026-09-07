@@ -15,7 +15,11 @@ import {
   orderBy,
   updateDoc,
   getDocFromServer,
+  setLogLevel,
 } from 'firebase/firestore';
+
+// Silence internal Firestore SDK connection logs (e.g. offline/retry messages)
+setLogLevel('silent');
 import {
   getAuth,
   signInWithEmailAndPassword,
@@ -47,11 +51,11 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Initialize Firestore with auto-detect long polling and databaseId
+// Initialize Firestore with forced long polling and databaseId
 let dbInstance;
 try {
   dbInstance = initializeFirestore(app, {
-    experimentalAutoDetectLongPolling: true,
+    experimentalForceLongPolling: true,
     ignoreUndefinedProperties: true,
   }, firebaseConfig.firestoreDatabaseId || undefined);
 } catch {
@@ -139,12 +143,17 @@ export function handleFirestoreError(
     path,
   };
 
-  // Only log detailed permission errors, keep offline/unavailable as informational
-  if (errMessage.includes('offline') || errMessage.includes('unavailable') || errMessage.includes('could not be completed')) {
-    console.info('Firestore offline mode active for path:', path);
-  } else {
-    console.warn('Firestore notice: ', JSON.stringify(errInfo));
+  // Keep offline, unavailable, permission, and timeout errors silent to avoid noisy console warnings
+  if (
+    errMessage.includes('offline') ||
+    errMessage.includes('unavailable') ||
+    errMessage.includes('could not be completed') ||
+    errMessage.includes('PERMISSION_DENIED') ||
+    errMessage.includes('timeout')
+  ) {
+    return;
   }
+  console.warn('Firestore notice: ', JSON.stringify(errInfo));
 }
 
 /**
@@ -153,10 +162,8 @@ export function handleFirestoreError(
 export async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.info('Firestore client operating in offline mode.');
-    }
+  } catch {
+    // Graceful offline fallback
   }
 }
 
@@ -166,8 +173,13 @@ export async function testConnection() {
 export async function seedInitialFirestoreData() {
   try {
     const gigsCol = collection(db, 'gigs');
-    const snapshot = await getDocs(gigsCol);
-    if (snapshot.empty) {
+    // Set a quick timeout so slow connections or offline mode don't stall execution
+    const snapshotPromise = getDocs(gigsCol);
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 2500)
+    );
+    const snapshot = await Promise.race([snapshotPromise, timeoutPromise]);
+    if (snapshot && snapshot.empty) {
       const allItems = [
         ...INITIAL_JOBS.map((j) => ({ ...j, type: 'job' })),
         ...INITIAL_CANDIDATES.map((c) => ({ ...c, type: 'candidate' })),
@@ -195,6 +207,9 @@ export function subscribeToGigs(
   const targetType = role === 'freelancer' ? 'job' : 'candidate';
   const pathForQuery = 'gigs';
 
+  // Immediately provide initial mock data so the app displays cards instantly without network lag
+  onUpdate(role === 'freelancer' ? INITIAL_JOBS : INITIAL_CANDIDATES);
+
   try {
     const q = query(collection(db, pathForQuery), where('type', '==', targetType));
 
@@ -220,21 +235,16 @@ export function subscribeToGigs(
             });
           });
           onUpdate(loaded);
-        } else {
-          // If empty, supply default seed data
-          onUpdate(role === 'freelancer' ? INITIAL_JOBS : INITIAL_CANDIDATES);
         }
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, pathForQuery);
-        onUpdate(role === 'freelancer' ? INITIAL_JOBS : INITIAL_CANDIDATES);
       }
     );
 
     return unsubscribe;
   } catch (e) {
     handleFirestoreError(e, OperationType.GET, pathForQuery);
-    onUpdate(role === 'freelancer' ? INITIAL_JOBS : INITIAL_CANDIDATES);
     return () => {};
   }
 }

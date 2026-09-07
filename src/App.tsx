@@ -38,28 +38,60 @@ export default function App() {
   const [jobs, setJobs] = useState<GigItem[]>(INITIAL_JOBS);
   const [candidates, setCandidates] = useState<GigItem[]>(INITIAL_CANDIDATES);
 
-  // Matches & Chat State
-  const [matches, setMatches] = useState<MatchRecord[]>([]);
+  // Matches & Chat State with local persistence fallback
+  const [matches, setMatches] = useState<MatchRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('gigly_matches');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [matchedOverlayJob, setMatchedOverlayJob] = useState<GigItem | null>(null);
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
 
-  // User Profile State
-  const [profile, setProfile] = useState<UserProfile>({
-    name: 'Yash S.',
-    role: 'freelancer',
-    roleTitle: 'Product & Frontend Designer',
-    rateOrBudget: '$55–70 / hr',
-    bio: 'I design and build product interfaces end to end — from Figma flows to shipped React. I like short, well-scoped sprints over long open-ended retainers.',
-    skills: ['Figma', 'React', 'Design systems', 'UX writing'],
-    email: 'giglycompany@gmail.com',
-    avatarInitials: 'YS',
-    verified: true,
-    stats: {
-      appliedOrPosted: 18,
-      hired: 5,
-      ratingOrResponse: '96%',
-    },
+  // User Profile State with local persistence fallback
+  const [profile, setProfile] = useState<UserProfile>(() => {
+    const defaultProfile: UserProfile = {
+      name: 'Yash S.',
+      role: 'freelancer',
+      roleTitle: 'Product & Frontend Designer',
+      rateOrBudget: '$55–70 / hr',
+      bio: 'I design and build product interfaces end to end — from Figma flows to shipped React. I like short, well-scoped sprints over long open-ended retainers.',
+      skills: ['Figma', 'React', 'Design systems', 'UX writing'],
+      email: 'giglycompany@gmail.com',
+      avatarInitials: 'YS',
+      verified: true,
+      stats: {
+        appliedOrPosted: 18,
+        hired: 5,
+        ratingOrResponse: '96%',
+      },
+    };
+    try {
+      const saved = localStorage.getItem('gigly_profile');
+      return saved ? { ...defaultProfile, ...JSON.parse(saved) } : defaultProfile;
+    } catch {
+      return defaultProfile;
+    }
   });
+
+  // Keep matches and profile synchronized in local storage
+  useEffect(() => {
+    try {
+      localStorage.setItem('gigly_matches', JSON.stringify(matches));
+    } catch {
+      // Ignore quota errors
+    }
+  }, [matches]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('gigly_profile', JSON.stringify(profile));
+    } catch {
+      // Ignore quota errors
+    }
+  }, [profile]);
 
   // Seed Firestore & Listen to Auth state on initial load
   useEffect(() => {
