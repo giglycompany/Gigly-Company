@@ -1,0 +1,6 @@
+{
+  "name": "Gigly",
+  "description": "Swipe through gigs or talent with matching, messaging, and profile customization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

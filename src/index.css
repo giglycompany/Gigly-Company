@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-logo: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+    --font-display: 'Outfit', 'Plus Jakarta Sans', 'Poppins', sans-serif;
+    --font-body: 'Karla', sans-serif;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background-color: #FFFCF5;
+    color: #1A1A1A;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .font-logo {
+    font-family: var(--font-logo);
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-display {
+    font-family: var(--font-display);
+  }
+
+  /* Custom styled scrollbars for Gigly */
+  .custom-scrollbar-x {
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #FFC629 #ECE8DF;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .custom-scrollbar-x::-webkit-scrollbar {
+    height: 8px;
+    display: block;
+  }
+
+  .custom-scrollbar-x::-webkit-scrollbar-track {
+    background: #ECE8DF;
+    border-radius: 9999px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+  }
+
+  .custom-scrollbar-x::-webkit-scrollbar-thumb {
+    background: #FFC629;
+    border-radius: 9999px;
+    border: 1.5px solid #1A1A1A;
+  }
+
+  .custom-scrollbar-x::-webkit-scrollbar-thumb:hover {
+    background: #E5B020;
+  }
+
+  .custom-scrollbar-y {
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #FFC629 #ECE8DF;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .custom-scrollbar-y::-webkit-scrollbar {
+    width: 8px;
+    display: block;
+  }
+
+  .custom-scrollbar-y::-webkit-scrollbar-track {
+    background: #ECE8DF;
+    border-radius: 9999px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+  }
+
+  .custom-scrollbar-y::-webkit-scrollbar-thumb {
+    background: #FFC629;
+    border-radius: 9999px;
+    border: 1.5px solid #1A1A1A;
+  }
+
+  .custom-scrollbar-y::-webkit-scrollbar-thumb:hover {
+    background: #E5B020;
+  }
+
+  .force-scrollbar-y {
+    overflow-y: scroll !important;
+  }
+}

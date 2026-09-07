@@ -1,0 +1,57 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account and profile information",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["freelancer", "business"] },
+        "category": { "type": "string" },
+        "hourlyRate": { "type": "string" },
+        "bio": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "role"]
+    },
+    "Gig": {
+      "title": "Gig",
+      "description": "Gig or talent listing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "client": { "type": "string" },
+        "clientId": { "type": "string" },
+        "category": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "desc": { "type": "string" },
+        "rate": { "type": "string" },
+        "unit": { "type": "string" },
+        "hot": { "type": "boolean" },
+        "proposals": { "type": "string" },
+        "posted": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "category", "rate"]
+    },
+    "Swipe": {
+      "title": "Swipe",
+      "description": "Swipe action records",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "itemId": { "type": "string" },
+        "direction": { "type": "string", "enum": ["left", "right", "up"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "itemId", "direction"]
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  }
+}
