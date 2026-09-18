@@ -60,15 +60,18 @@ export interface MatchRecord {
 }
 
 export interface UserProfile {
+  userId?: string;
   name: string;
   role: 'freelancer' | 'business';
   roleTitle: string;
   rateOrBudget: string;
+  category?: string;
   bio: string;
   skills: string[];
   email: string;
   avatarInitials: string;
   verified: boolean;
+  profileCompleted?: boolean;
   stats: {
     appliedOrPosted: number;
     hired: number;
@@ -76,4 +79,13 @@ export interface UserProfile {
   };
 }
 
-export type AppScreen = 'startup' | 'auth' | 'roleSelect' | 'explore' | 'matches' | 'messages' | 'profile' | 'admin';
+export type AppScreen =
+  | 'startup'
+  | 'auth'
+  | 'onboarding'
+  | 'roleSelect'
+  | 'explore'
+  | 'matches'
+  | 'messages'
+  | 'profile'
+  | 'admin';

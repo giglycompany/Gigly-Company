@@ -15,10 +15,13 @@ import {
   saveMatchToFirestore,
   syncMatchMessagesToFirestore,
   saveUserProfileToFirestore,
+  getUserProfileFromFirestore,
+  subscribeToUserMatches,
 } from './lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { StartupAnimation } from './components/StartupAnimation';
 import { AuthScreen } from './components/AuthScreen';
+import { OnboardingProfileScreen } from './components/OnboardingProfileScreen';
 import { RoleSelectScreen } from './components/RoleSelectScreen';
 import { ExploreDeck } from './components/ExploreDeck';
 import { MatchOverlay } from './components/MatchOverlay';
@@ -38,15 +41,8 @@ export default function App() {
   const [jobs, setJobs] = useState<GigItem[]>(INITIAL_JOBS);
   const [candidates, setCandidates] = useState<GigItem[]>(INITIAL_CANDIDATES);
 
-  // Matches & Chat State with local persistence fallback
-  const [matches, setMatches] = useState<MatchRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem('gigly_matches');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Matches & Chat State with user-isolated persistence
+  const [matches, setMatches] = useState<MatchRecord[]>([]);
   const [matchedOverlayJob, setMatchedOverlayJob] = useState<GigItem | null>(null);
   const [isSuperLikeMatch, setIsSuperLikeMatch] = useState(false);
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
@@ -63,56 +59,97 @@ export default function App() {
       email: 'giglycompany@gmail.com',
       avatarInitials: 'YS',
       verified: true,
+      profileCompleted: true,
       stats: {
         appliedOrPosted: 18,
         hired: 5,
         ratingOrResponse: '96%',
       },
     };
-    try {
-      const saved = localStorage.getItem('gigly_profile');
-      return saved ? { ...defaultProfile, ...JSON.parse(saved) } : defaultProfile;
-    } catch {
-      return defaultProfile;
-    }
+    return defaultProfile;
   });
-
-  // Keep matches and profile synchronized in local storage
-  useEffect(() => {
-    try {
-      localStorage.setItem('gigly_matches', JSON.stringify(matches));
-    } catch {
-      // Ignore quota errors
-    }
-  }, [matches]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('gigly_profile', JSON.stringify(profile));
-    } catch {
-      // Ignore quota errors
-    }
-  }, [profile]);
 
   // Seed Firestore & Listen to Auth state on initial load
   useEffect(() => {
     seedInitialFirestoreData();
 
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
+    const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUserId(user.uid);
-        if (user.email) {
+
+        // 1. Try local storage cache for instant 0ms rendering
+        try {
+          const cachedProfile = localStorage.getItem(`gigly_profile_${user.uid}`);
+          if (cachedProfile) {
+            const parsed = JSON.parse(cachedProfile);
+            if (parsed && parsed.profileCompleted) {
+              setProfile(parsed);
+              setUserRole(parsed.role || 'freelancer');
+              setCurrentScreen((prev) =>
+                ['auth', 'onboarding'].includes(prev) ? 'explore' : prev
+              );
+              return;
+            }
+          }
+        } catch {
+          // Ignore cache read errors
+        }
+
+        // 2. Fast check Firestore (max 1.2s timeout)
+        const firestoreProf = await getUserProfileFromFirestore(user.uid);
+        if (firestoreProf && firestoreProf.profileCompleted) {
+          // Returning user: restore their profile and role
+          setProfile(firestoreProf);
+          setUserRole(firestoreProf.role);
+          try {
+            localStorage.setItem(`gigly_profile_${user.uid}`, JSON.stringify(firestoreProf));
+          } catch {}
+          setCurrentScreen((prev) =>
+            ['auth', 'onboarding'].includes(prev) ? 'explore' : prev
+          );
+        } else {
+          // New user / new email: Immediately show profile setup
           setProfile((prev) => ({
             ...prev,
             email: user.email || prev.email,
-            name: user.displayName || user.email.split('@')[0] || prev.name,
+            name: user.displayName || (user.email ? user.email.split('@')[0] : prev.name),
+            userId: user.uid,
+            profileCompleted: false,
           }));
+          setCurrentScreen((prev) => (prev === 'startup' ? prev : 'onboarding'));
         }
+      } else {
+        setCurrentUserId('guest-user');
+        setMatches([]);
       }
     });
 
     return () => unsubAuth();
   }, []);
+
+  // Subscribe to user-specific matches in Firestore
+  useEffect(() => {
+    if (!currentUserId || currentUserId === 'guest-user') {
+      return;
+    }
+
+    // Load cached matches for this specific user
+    try {
+      const cached = localStorage.getItem(`gigly_matches_${currentUserId}`);
+      if (cached) {
+        setMatches(JSON.parse(cached));
+      }
+    } catch {}
+
+    const unsubMatches = subscribeToUserMatches(currentUserId, (userMatches) => {
+      setMatches(userMatches);
+      try {
+        localStorage.setItem(`gigly_matches_${currentUserId}`, JSON.stringify(userMatches));
+      } catch {}
+    });
+
+    return () => unsubMatches();
+  }, [currentUserId]);
 
   // Subscribe to real-time gigs / talent from Firestore
   useEffect(() => {
@@ -126,6 +163,106 @@ export default function App() {
 
     return () => unsubGigs();
   }, [userRole]);
+
+  // Handle Authentication Success
+  const handleAuthSuccess = async (role?: 'freelancer' | 'business') => {
+    const user = auth.currentUser;
+    if (user) {
+      setCurrentUserId(user.uid);
+
+      // Fast check cached profile first for instant 0ms transition
+      try {
+        const cached = localStorage.getItem(`gigly_profile_${user.uid}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.profileCompleted) {
+            setProfile(parsed);
+            setUserRole(parsed.role || 'freelancer');
+            setCurrentScreen('explore');
+            return;
+          }
+        }
+      } catch {}
+
+      // Fast Firestore check (max 1.2s timeout)
+      const firestoreProf = await getUserProfileFromFirestore(user.uid);
+      if (firestoreProf && firestoreProf.profileCompleted) {
+        // Returning user with completed profile
+        setProfile(firestoreProf);
+        setUserRole(firestoreProf.role);
+        try {
+          localStorage.setItem(`gigly_profile_${user.uid}`, JSON.stringify(firestoreProf));
+        } catch {}
+        setCurrentScreen('explore');
+      } else {
+        // New email! Mandatory to fill in profile
+        setProfile((prev) => ({
+          ...prev,
+          email: user.email || prev.email,
+          name: user.displayName || (user.email ? user.email.split('@')[0] : prev.name),
+          userId: user.uid,
+          profileCompleted: false,
+        }));
+        setCurrentScreen('onboarding');
+      }
+    } else if (role) {
+      handleSelectRole(role);
+    } else {
+      setCurrentScreen('roleSelect');
+    }
+  };
+
+  // Complete Mandatory Profile Onboarding for New Users
+  const handleCompleteOnboarding = async (newProfile: UserProfile) => {
+    const uid = auth.currentUser?.uid || currentUserId;
+    const completed: UserProfile = {
+      ...newProfile,
+      userId: uid,
+      profileCompleted: true,
+    };
+
+    // 1. Immediately save to local storage
+    try {
+      localStorage.setItem(`gigly_profile_${uid}`, JSON.stringify(completed));
+    } catch {}
+
+    // 2. Immediately update state and transition to explore (never hangs the user!)
+    setProfile(completed);
+    setUserRole(completed.role);
+    setCurrentScreen('explore');
+
+    // 3. Persist to Firestore asynchronously in background
+    saveUserProfileToFirestore(uid, completed).catch((err) => {
+      console.warn('Background profile save warning:', err);
+    });
+  };
+
+  // Handle User Log Out
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+    } catch (err) {
+      console.warn('Sign out error:', err);
+    }
+    setCurrentUserId('guest-user');
+    setMatches([]);
+    setCurrentScreen('auth');
+  };
+
+  // Handle Profile Updates
+  const handleUpdateProfile = (updated: Partial<UserProfile>) => {
+    setProfile((prev) => {
+      const next = { ...prev, ...updated };
+      const uid = auth.currentUser?.uid || currentUserId;
+      if (uid && uid !== 'guest-user') {
+        saveUserProfileToFirestore(uid, next);
+        try {
+          localStorage.setItem(`gigly_profile_${uid}`, JSON.stringify(next));
+        } catch {}
+      }
+      return next;
+    });
+  };
 
   // Handle Role Selection
   const handleSelectRole = (role: 'freelancer' | 'business') => {
@@ -226,15 +363,18 @@ export default function App() {
       {/* 2. AUTH SCREEN */}
       {currentScreen === 'auth' && (
         <AuthScreen
-          onSuccess={(role) => {
-            if (role) {
-              handleSelectRole(role);
-            } else {
-              setCurrentScreen('roleSelect');
-            }
-          }}
+          onSuccess={handleAuthSuccess}
           onAdminClick={() => setCurrentScreen('admin')}
           onBackToStartup={() => setCurrentScreen('startup')}
+        />
+      )}
+
+      {/* 2.5 MANDATORY PROFILE SETUP FOR NEW USERS */}
+      {currentScreen === 'onboarding' && (
+        <OnboardingProfileScreen
+          userEmail={profile.email || auth.currentUser?.email || ''}
+          initialName={profile.name}
+          onSaveProfile={handleCompleteOnboarding}
         />
       )}
 
@@ -286,6 +426,14 @@ export default function App() {
                   matches={matches}
                   role={userRole}
                   onOpenChat={(id) => {
+                    const targetMatch = matches.find((m) => m.id === id);
+                    if (
+                      targetMatch &&
+                      (!targetMatch.messages || targetMatch.messages.length === 0) &&
+                      targetMatch.expiresAt <= Date.now()
+                    ) {
+                      return; // Pitch window closed
+                    }
                     setActiveChatId(id);
                     setCurrentScreen('messages');
                   }}
@@ -321,9 +469,8 @@ export default function App() {
               >
                 <ProfileScreen
                   profile={profile}
-                  onUpdateProfile={(updated) =>
-                    setProfile((prev) => ({ ...prev, ...updated }))
-                  }
+                  onUpdateProfile={handleUpdateProfile}
+                  onLogout={handleLogout}
                   onSwitchRole={() => {
                     const newRole = userRole === 'freelancer' ? 'business' : 'freelancer';
                     handleSelectRole(newRole);
@@ -343,7 +490,11 @@ export default function App() {
               setCurrentScreen(screen);
             }}
             matchesBadgeCount={
-              matches.filter((m) => !m.messages || m.messages.length === 0).length
+              matches.filter(
+                (m) =>
+                  (!m.messages || m.messages.length === 0) &&
+                  m.expiresAt > Date.now()
+              ).length
             }
             messagesBadgeCount={unreadMessagesCount}
           />

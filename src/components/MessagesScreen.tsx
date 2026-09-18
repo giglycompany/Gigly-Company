@@ -13,6 +13,7 @@ import {
   X,
   ExternalLink,
   MessageSquare,
+  Lock,
 } from 'lucide-react';
 import {
   FREELANCER_SUGGESTIONS,
@@ -78,6 +79,30 @@ export function MessagesScreen({
 
   // 1. Detailed Chat View
   if (activeMatch) {
+    const isExpiredMatch = (!activeMatch.messages || activeMatch.messages.length === 0) && activeMatch.expiresAt <= Date.now();
+
+    if (isExpiredMatch) {
+      return (
+        <div className="w-full h-[calc(100dvh-130px)] min-h-[460px] flex flex-col items-center justify-center text-center p-6 bg-white border-[2.5px] border-black rounded-[26px] shadow-[4px_5px_0px_0px_#000]">
+          <div className="w-14 h-14 rounded-full bg-gray-100 border-2 border-black flex items-center justify-center mb-3">
+            <Lock className="w-6 h-6 text-gray-500" />
+          </div>
+          <h3 className="font-display font-[800] text-[18px] text-black mb-1">
+            Pitch Window Closed
+          </h3>
+          <p className="text-[13px] font-medium text-[#6E6E6E] max-w-[280px] mb-5">
+            The 24-hour response window for this match has expired. Profile and messaging are no longer accessible.
+          </p>
+          <button
+            onClick={() => onSelectChat(null)}
+            className="py-2.5 px-5 bg-black text-[#FFC629] font-display font-bold text-[13px] rounded-full border-[2px] border-black cursor-pointer shadow-[2px_2px_0px_0px_#FFF] hover:translate-y-[-1px] active:translate-y-[1px]"
+          >
+            Back to conversations
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div className="w-full h-[calc(100dvh-130px)] min-h-[460px] flex flex-col justify-between relative">
         {/* Header - Clickable to view profile */}
@@ -362,32 +387,63 @@ export function MessagesScreen({
       ) : (
         <div className="flex flex-col gap-3">
           {matches.map((m) => {
+            const hasResponded = m.messages && m.messages.length > 0;
+            const isWindowClosed = !hasResponded && m.expiresAt <= Date.now();
             const lastMessage = m.messages[m.messages.length - 1];
-            const preview = lastMessage
+            const preview = isWindowClosed
+              ? 'Pitch window closed (24h expired)'
+              : lastMessage
               ? `${lastMessage.from === 'me' ? 'You: ' : ''}${lastMessage.text}`
               : `Say hi to ${m.job.client} 👋`;
 
             return (
               <motion.button
                 key={m.id}
-                whileHover={{ scale: 1.01, y: -1 }}
-                whileTap={{ scale: 0.99 }}
-                onClick={() => onSelectChat(m.id)}
-                className="flex items-center gap-3.5 bg-white border-[2.5px] border-black rounded-[20px] p-3.5 shadow-[4px_5px_0px_0px_#000] text-left cursor-pointer hover:shadow-[5px_6px_0px_0px_#000] transition-all"
+                disabled={isWindowClosed}
+                whileHover={!isWindowClosed ? { scale: 1.01, y: -1 } : undefined}
+                whileTap={!isWindowClosed ? { scale: 0.99 } : undefined}
+                onClick={() => !isWindowClosed && onSelectChat(m.id)}
+                className={`flex items-center gap-3.5 border-[2.5px] rounded-[20px] p-3.5 text-left transition-all select-none ${
+                  isWindowClosed
+                    ? 'bg-gray-100 border-gray-300 opacity-60 cursor-not-allowed shadow-none'
+                    : 'bg-white border-black shadow-[4px_5px_0px_0px_#000] cursor-pointer hover:shadow-[5px_6px_0px_0px_#000]'
+                }`}
               >
-                <div className="w-12 h-12 rounded-full bg-[#FFC629] border-[2.5px] border-black flex items-center justify-center font-display font-[800] text-[14px] text-black flex-shrink-0">
-                  {getInitials(m.job.client)}
+                <div
+                  className={`w-12 h-12 rounded-full border-[2.5px] flex items-center justify-center font-display font-[800] text-[14px] flex-shrink-0 ${
+                    isWindowClosed
+                      ? 'bg-gray-200 border-gray-400 text-gray-400'
+                      : 'bg-[#FFC629] border-black text-black'
+                  }`}
+                >
+                  {isWindowClosed ? (
+                    <Lock className="w-5 h-5 text-gray-400" />
+                  ) : (
+                    getInitials(m.job.client)
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <h4 className="font-display font-bold text-[14.5px] text-black truncate">
+                    <h4
+                      className={`font-display font-bold text-[14.5px] truncate ${
+                        isWindowClosed ? 'text-gray-500' : 'text-black'
+                      }`}
+                    >
                       {m.job.client}
                     </h4>
-                    {m.messages.length === 0 && (
+                    {isWindowClosed ? (
+                      <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-500 text-[10px] font-extrabold border border-gray-300">
+                        Closed
+                      </span>
+                    ) : m.messages.length === 0 ? (
                       <span className="w-2.5 h-2.5 rounded-full bg-[#FFC629] border-[1.5px] border-black" />
-                    )}
+                    ) : null}
                   </div>
-                  <p className="text-[12px] font-medium text-[#6E6E6E] truncate mt-0.5">
+                  <p
+                    className={`text-[12px] font-medium truncate mt-0.5 ${
+                      isWindowClosed ? 'text-gray-400 italic' : 'text-[#6E6E6E]'
+                    }`}
+                  >
                     {preview}
                   </p>
                 </div>

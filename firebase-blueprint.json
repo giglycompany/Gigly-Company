@@ -9,13 +9,18 @@
         "name": { "type": "string" },
         "email": { "type": "string" },
         "role": { "type": "string", "enum": ["freelancer", "business"] },
+        "roleTitle": { "type": "string" },
+        "rateOrBudget": { "type": "string" },
         "category": { "type": "string" },
-        "hourlyRate": { "type": "string" },
         "bio": { "type": "string" },
-        "tags": { "type": "array", "items": { "type": "string" } },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "profileCompleted": { "type": "boolean" },
+        "avatarInitials": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "name", "role"]
+      "required": ["userId", "name", "role", "profileCompleted"]
     },
     "Gig": {
       "title": "Gig",
@@ -49,6 +54,21 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "itemId", "direction"]
+    },
+    "Match": {
+      "title": "Match",
+      "description": "User matched gig or freelancer with messaging thread",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "userId": { "type": "string" },
+        "job": { "type": "object" },
+        "expiresAt": { "type": "number" },
+        "messages": { "type": "array" },
+        "matchedAt": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "job", "expiresAt"]
     }
   },
   "firestore": {

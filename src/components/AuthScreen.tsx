@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, Sparkles, KeyRound, Mail, Lock } from 'lucide-react';
-import { auth, signInWithGoogle, saveUserProfileToFirestore } from '../lib/firebase';
+import { auth, signInWithGoogle, signInWithApple } from '../lib/firebase';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -11,7 +11,7 @@ import {
 import { GiglyLogo } from './GiglyLogo';
 
 interface AuthScreenProps {
-  onSuccess: (role?: 'freelancer' | 'business') => void;
+  onSuccess: (role?: 'freelancer' | 'business') => Promise<void> | void;
   onAdminClick: () => void;
   onBackToStartup: () => void;
 }
@@ -45,16 +45,14 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
       } else {
         await signInWithEmailAndPassword(auth, email.trim(), password);
       }
-      setLoading(false);
-      onSuccess();
+      await onSuccess();
     } catch (err: any) {
       console.warn('Firebase Auth notice:', err);
       // If user already exists on signup, try logging in or show friendly message
       if (err.code === 'auth/email-already-in-use') {
         try {
           await signInWithEmailAndPassword(auth, email.trim(), password);
-          setLoading(false);
-          onSuccess();
+          await onSuccess();
           return;
         } catch {
           setError('Email already exists. Switch to Log in tab to continue.');
@@ -65,6 +63,7 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
         // Fallback for prototype preview
         setError(err.message || 'Authentication error.');
       }
+    } finally {
       setLoading(false);
     }
   };
@@ -75,34 +74,8 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
     try {
       const result = await signInWithGoogle();
       if (result && result.user) {
-        // Automatically ensure user profile is in Firestore
-        const u = result.user;
-        const initials = (u.displayName || 'GU')
-          .split(' ')
-          .map((n) => n[0])
-          .join('')
-          .toUpperCase()
-          .slice(0, 2);
-
-        await saveUserProfileToFirestore(u.uid, {
-          name: u.displayName || 'Gigly Member',
-          role: 'freelancer',
-          roleTitle: 'Independent Specialist & Consultant',
-          rateOrBudget: '$65 / hr',
-          bio: 'Building, creating, and matching with innovative teams on Gigly.',
-          skills: ['UI/UX', 'Full-stack', 'Strategy'],
-          email: u.email || '',
-          avatarInitials: initials || 'GM',
-          verified: true,
-          stats: {
-            appliedOrPosted: 12,
-            hired: 8,
-            ratingOrResponse: '4.9 ★',
-          },
-        });
+        await onSuccess();
       }
-      setLoading(false);
-      onSuccess();
     } catch (err: any) {
       console.error('Firebase Google sign-in error:', err);
       if (err.code === 'auth/popup-closed-by-user') {
@@ -114,6 +87,31 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
       } else {
         setError(err.message || 'Google authentication failed.');
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAppleAuth = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await signInWithApple();
+      if (result && result.user) {
+        await onSuccess();
+      }
+    } catch (err: any) {
+      console.error('Firebase Apple sign-in error:', err);
+      if (err.code === 'auth/popup-closed-by-user') {
+        setError('Apple Sign-In popup was closed before completing. Please try again.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError('Domain unauthorized in Firebase Auth. Please check authorized domains in Firebase Console.');
+      } else if (err.code === 'auth/operation-not-allowed') {
+        setError('Apple sign-in provider is disabled or pending configuration in your Firebase console.');
+      } else {
+        setError(err.message || 'Apple authentication failed.');
+      }
+    } finally {
       setLoading(false);
     }
   };
@@ -124,7 +122,7 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
     } catch (err) {
       console.warn('Demo login notice:', err);
     }
-    onSuccess(role);
+    await onSuccess(role);
   };
 
   const handleForgot = async () => {
@@ -212,20 +210,38 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
           </div>
         )}
 
-        {/* Google Continue */}
-        <button
-          type="button"
-          onClick={handleGoogleAuth}
-          className="w-full py-3 px-4 flex items-center justify-center gap-3 bg-white border-[2.5px] border-black rounded-full font-display font-bold text-[14px] shadow-[3px_4px_0px_0px_#000] hover:translate-y-[-1px] active:translate-y-[1px] transition-transform"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 48 48">
-            <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/>
-            <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.8 1.1 8 3l5.7-5.7C34.5 6.1 29.5 4 24 4c-7.6 0-14.1 4.3-17.7 10.7z"/>
-            <path fill="#4CAF50" d="M24 44c5.4 0 10.3-2.1 14-5.5l-6.5-5.4C29.4 34.9 26.9 36 24 36c-5.3 0-9.7-3.4-11.3-8.1l-6.5 5C9.8 39.6 16.3 44 24 44z"/>
-            <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1 2.9-3 5.3-5.7 6.9l6.5 5.4C39.9 37.6 44 31.6 44 24c0-1.3-.1-2.7-.4-3.5z"/>
-          </svg>
-          <span>Continue with Google</span>
-        </button>
+        {/* Social Logins: Google & Apple */}
+        <div className="space-y-2.5">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={handleGoogleAuth}
+            className="w-full py-3 px-4 flex items-center justify-center gap-3 bg-white border-[2.5px] border-black rounded-full font-display font-bold text-[14px] shadow-[3px_4px_0px_0px_#000] hover:translate-y-[-1px] active:translate-y-[1px] transition-transform cursor-pointer disabled:opacity-60"
+          >
+            <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 48 48">
+              <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/>
+              <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.8 1.1 8 3l5.7-5.7C34.5 6.1 29.5 4 24 4c-7.6 0-14.1 4.3-17.7 10.7z"/>
+              <path fill="#4CAF50" d="M24 44c5.4 0 10.3-2.1 14-5.5l-6.5-5.4C29.4 34.9 26.9 36 24 36c-5.3 0-9.7-3.4-11.3-8.1l-6.5 5C9.8 39.6 16.3 44 24 44z"/>
+              <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1 2.9-3 5.3-5.7 6.9l6.5 5.4C39.9 37.6 44 31.6 44 24c0-1.3-.1-2.7-.4-3.5z"/>
+            </svg>
+            <span className="leading-none">Continue with Google</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={handleAppleAuth}
+            className="w-full py-3 px-4 flex items-center justify-center gap-3 bg-black text-white border-[2.5px] border-black rounded-full font-display font-bold text-[14px] shadow-[3px_4px_0px_0px_#000] hover:bg-[#1A1A1A] hover:translate-y-[-1px] active:translate-y-[1px] transition-transform cursor-pointer disabled:opacity-60"
+          >
+            <svg
+              className="w-5 h-5 fill-current flex-shrink-0 -translate-y-[1px]"
+              viewBox="0 0 24 24"
+            >
+              <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.4c.64-.78 1.08-1.86.96-2.95-1 .04-2.14.67-2.8 1.44-.58.67-1.1 1.77-.96 2.84 1.12.09 2.16-.55 2.8-1.33z" />
+            </svg>
+            <span className="leading-none">Continue with Apple</span>
+          </button>
+        </div>
 
         {/* Divider */}
         <div className="flex items-center gap-3 my-4">
@@ -281,9 +297,16 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 bg-[#FFC629] text-black font-display font-[800] text-[15px] rounded-full border-[2.5px] border-black cursor-pointer shadow-[3px_4px_0px_0px_#000] hover:translate-y-[-1px] active:translate-y-[1px] transition-transform mt-2"
+            className="w-full py-3.5 bg-[#FFC629] text-black font-display font-[800] text-[15px] rounded-full border-[2.5px] border-black cursor-pointer shadow-[3px_4px_0px_0px_#000] hover:translate-y-[-1px] active:translate-y-[1px] transition-transform mt-2 disabled:opacity-75 flex items-center justify-center gap-2"
           >
-            {loading ? 'Processing...' : tab === 'login' ? 'Log in' : 'Sign up'}
+            {loading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                <span>{tab === 'login' ? 'Logging in...' : 'Creating account...'}</span>
+              </>
+            ) : (
+              <span>{tab === 'login' ? 'Log in' : 'Sign up'}</span>
+            )}
           </button>
         </form>
 

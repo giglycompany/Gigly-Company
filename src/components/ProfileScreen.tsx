@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { UserProfile } from '../types';
-import { Check, Edit3, ShieldCheck, Star } from 'lucide-react';
+import { Check, Edit3, ShieldCheck, Star, LogOut, Mail, Tag } from 'lucide-react';
 
 interface ProfileScreenProps {
   profile: UserProfile;
   onUpdateProfile: (updated: Partial<UserProfile>) => void;
   onSwitchRole: () => void;
+  onLogout?: () => void;
 }
 
-export function ProfileScreen({ profile, onUpdateProfile, onSwitchRole }: ProfileScreenProps) {
+export function ProfileScreen({ profile, onUpdateProfile, onSwitchRole, onLogout }: ProfileScreenProps) {
   const [isEditing, setIsEditing] = useState(false);
 
   // Form states
@@ -234,6 +235,33 @@ export function ProfileScreen({ profile, onUpdateProfile, onSwitchRole }: Profil
               </button>
             </div>
           </div>
+        )}
+      </div>
+
+      {/* Account Info & Sign Out */}
+      <div className="mt-4 p-4 bg-white border-[2.5px] border-black rounded-[20px] shadow-[3px_4px_0px_0px_#000] flex items-center justify-between">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-[#FFF9E6] border border-black flex items-center justify-center flex-shrink-0">
+            <Mail className="w-4 h-4 text-black" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10.5px] font-extrabold uppercase text-[#6E6E6E] leading-none">
+              Signed in as
+            </div>
+            <div className="text-[13px] font-bold text-black truncate max-w-[190px]">
+              {profile.email || 'Connected Account'}
+            </div>
+          </div>
+        </div>
+
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            className="py-1.5 px-3 bg-[#FFEBEA] border-[1.5px] border-[#D93025] rounded-full text-[11.5px] font-bold text-[#D93025] flex items-center gap-1 hover:bg-[#D93025] hover:text-white transition-colors cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sign out</span>
+          </button>
         )}
       </div>
     </div>

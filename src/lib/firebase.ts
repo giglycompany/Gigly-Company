@@ -7,6 +7,7 @@ import {
   doc,
   setDoc,
   getDocs,
+  getDoc,
   onSnapshot,
   query,
   where,
@@ -28,6 +29,7 @@ import {
   signInWithRedirect,
   getRedirectResult,
   GoogleAuthProvider,
+  OAuthProvider,
   signInAnonymously,
   onAuthStateChanged,
   User,
@@ -84,6 +86,31 @@ export async function signInWithGoogle() {
     if (error?.code === 'auth/popup-blocked') {
       try {
         await signInWithRedirect(auth, googleProvider);
+        return null;
+      } catch (redirectErr) {
+        throw redirectErr;
+      }
+    }
+    throw error;
+  }
+}
+
+// Apple Auth Provider configured with standard scopes
+export const appleProvider = new OAuthProvider('apple.com');
+appleProvider.addScope('email');
+appleProvider.addScope('name');
+
+/**
+ * Sign in using Firebase OAuthProvider for Apple
+ */
+export async function signInWithApple() {
+  try {
+    const result = await signInWithPopup(auth, appleProvider);
+    return result;
+  } catch (error: any) {
+    if (error?.code === 'auth/popup-blocked') {
+      try {
+        await signInWithRedirect(auth, appleProvider);
         return null;
       } catch (redirectErr) {
         throw redirectErr;
@@ -303,15 +330,86 @@ export async function syncMatchMessagesToFirestore(matchId: number, messages: an
 }
 
 /**
+ * Fetch a user profile from Firestore with fast timeout fallback
+ */
+export async function getUserProfileFromFirestore(userId: string): Promise<UserProfile | null> {
+  if (!userId || userId === 'guest-user') return null;
+  const userPath = `users/${userId}`;
+  try {
+    const userRef = doc(db, 'users', userId);
+    // Fast timeout (1200ms) so slow cloud connection never freezes or stalls the app
+    const fetchPromise = getDoc(userRef);
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 1200)
+    );
+    const snap: any = await Promise.race([fetchPromise, timeoutPromise]);
+    if (snap && typeof snap.exists === 'function' && snap.exists()) {
+      return snap.data() as UserProfile;
+    }
+    return null;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, userPath);
+    return null;
+  }
+}
+
+/**
+ * Subscribe to user-specific matches in Firestore in real-time
+ */
+export function subscribeToUserMatches(
+  userId: string,
+  onUpdate: (matches: MatchRecord[]) => void
+): () => void {
+  if (!userId) return () => {};
+  try {
+    const q = query(collection(db, 'matches'), where('userId', '==', userId));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const list: MatchRecord[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          list.push({
+            id: data.id,
+            job: data.job,
+            expiresAt: data.expiresAt,
+            messages: data.messages || [],
+            matchedAt: data.matchedAt || 'Just now',
+          });
+        });
+        // Sort newest matches first
+        list.sort((a, b) => b.id - a.id);
+        onUpdate(list);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, 'matches');
+      }
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'matches');
+    return () => {};
+  }
+}
+
+/**
  * Sync user profile to Firestore
  */
 export async function saveUserProfileToFirestore(userId: string, profile: UserProfile) {
+  if (!userId || userId === 'guest-user') return;
   const userPath = `users/${userId}`;
   try {
-    await setDoc(doc(db, 'users', userId), {
-      ...profile,
-      updatedAt: serverTimestamp(),
-    });
+    const writePromise = setDoc(
+      doc(db, 'users', userId),
+      {
+        ...profile,
+        userId,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    // Timeout of 1200ms ensures UI callers are never hung up by Firestore connection state
+    const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+    await Promise.race([writePromise, timeoutPromise]);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, userPath);
   }
