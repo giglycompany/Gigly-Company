@@ -48,6 +48,7 @@ export default function App() {
     }
   });
   const [matchedOverlayJob, setMatchedOverlayJob] = useState<GigItem | null>(null);
+  const [isSuperLikeMatch, setIsSuperLikeMatch] = useState(false);
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
 
   // User Profile State with local persistence fallback
@@ -170,6 +171,7 @@ export default function App() {
       };
 
       setMatches((prev) => [newMatch, ...prev]);
+      setIsSuperLikeMatch(direction === 'up');
       setMatchedOverlayJob(item);
       saveMatchToFirestore(newMatch, currentUserId);
     }
@@ -349,17 +351,27 @@ export default function App() {
       )}
 
       {/* MATCH POPUP OVERLAY */}
-      <MatchOverlay
-        matchedJob={matchedOverlayJob}
-        onKeepSwiping={() => setMatchedOverlayJob(null)}
-        onGoToChat={() => {
-          if (matches.length > 0) {
-            setActiveChatId(matches[0].id);
-          }
-          setMatchedOverlayJob(null);
-          setCurrentScreen('messages');
-        }}
-      />
+      <AnimatePresence>
+        {matchedOverlayJob && (
+          <MatchOverlay
+            key={matchedOverlayJob.id}
+            matchedJob={matchedOverlayJob}
+            isSuperLike={isSuperLikeMatch}
+            onKeepSwiping={() => {
+              setMatchedOverlayJob(null);
+              setIsSuperLikeMatch(false);
+            }}
+            onGoToChat={() => {
+              if (matches.length > 0) {
+                setActiveChatId(matches[0].id);
+              }
+              setMatchedOverlayJob(null);
+              setIsSuperLikeMatch(false);
+              setCurrentScreen('messages');
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

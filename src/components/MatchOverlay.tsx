@@ -1,65 +1,105 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles, MessageSquare, ArrowRight } from 'lucide-react';
+import { motion } from 'motion/react';
+import { Sparkles, MessageSquare, ArrowRight, Star } from 'lucide-react';
 import { GigItem } from '../types';
 
 interface MatchOverlayProps {
-  matchedJob: GigItem | null;
+  key?: React.Key;
+  matchedJob: GigItem;
+  isSuperLike?: boolean;
   onKeepSwiping: () => void;
   onGoToChat: () => void;
 }
 
-export function MatchOverlay({ matchedJob, onKeepSwiping, onGoToChat }: MatchOverlayProps) {
+export function MatchOverlay({
+  matchedJob,
+  isSuperLike = false,
+  onKeepSwiping,
+  onGoToChat,
+}: MatchOverlayProps) {
   const [timeLeft, setTimeLeft] = useState(24 * 3600);
 
   useEffect(() => {
-    if (!matchedJob) return;
     const interval = setInterval(() => {
       setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
     return () => clearInterval(interval);
-  }, [matchedJob]);
-
-  if (!matchedJob) return null;
+  }, []);
 
   const hours = String(Math.floor(timeLeft / 3600)).padStart(2, '0');
   const minutes = String(Math.floor((timeLeft % 3600) / 60)).padStart(2, '0');
   const seconds = String(timeLeft % 60).padStart(2, '0');
 
   return (
-    <AnimatePresence>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.25 }}
+      className="fixed inset-0 bg-[#FFC629] z-50 flex flex-col items-center justify-center p-6 text-center select-none"
+    >
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-[#FFC629] z-50 flex flex-col items-center justify-center p-6 text-center select-none"
+        initial={{ scale: 0.85, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.85, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+        className="max-w-[380px] flex flex-col items-center"
       >
-        <motion.div
-          initial={{ scale: 0.5, rotate: -8 }}
-          animate={{ scale: 1, rotate: 0 }}
-          transition={{ type: 'spring', stiffness: 260, damping: 18 }}
-          className="max-w-[380px] flex flex-col items-center"
-        >
           {/* Animated Badge */}
-          <div className="w-16 h-16 rounded-2xl bg-black border-[3px] border-black flex items-center justify-center mb-4 shadow-[4px_4px_0px_0px_#FFF]">
-            <Sparkles className="w-9 h-9 text-[#FFC629] fill-[#FFC629]" />
+          <div className="w-16 h-16 rounded-2xl bg-black border-[3px] border-black flex items-center justify-center mb-3 shadow-[4px_4px_0px_0px_#FFF] relative">
+            {isSuperLike ? (
+              <Star className="w-9 h-9 text-[#FFC629] fill-[#FFC629]" />
+            ) : (
+              <Sparkles className="w-9 h-9 text-[#FFC629] fill-[#FFC629]" />
+            )}
           </div>
+
+          {/* Superlike indicator pill */}
+          {isSuperLike && (
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              className="bg-black text-[#FFC629] px-3.5 py-1 rounded-full text-[11px] font-display font-[900] uppercase tracking-wider mb-2 border-[2px] border-black shadow-[2px_2px_0px_0px_#FFF]"
+            >
+              ★ Priority Super Match
+            </motion.div>
+          )}
 
           <h1 className="font-display font-[900] text-[44px] text-black leading-none tracking-tight mb-2">
             IT'S A MATCH
           </h1>
 
           <p className="text-[14px] font-bold text-black max-w-[280px] leading-snug mb-6">
-            <span className="underline decoration-black">{matchedJob.client}</span> liked your profile back for{' '}
-            <span className="font-extrabold">"{matchedJob.title}"</span>.
+            {isSuperLike ? (
+              <>
+                <span className="underline decoration-black">{matchedJob.client}</span> accepted your{' '}
+                <span className="font-extrabold">Super Like</span> for{' '}
+                <span className="font-extrabold">"{matchedJob.title}"</span>.
+              </>
+            ) : (
+              <>
+                <span className="underline decoration-black">{matchedJob.client}</span> liked your profile back for{' '}
+                <span className="font-extrabold">"{matchedJob.title}"</span>.
+              </>
+            )}
           </p>
 
-          {/* Countdown Pill */}
-          <div className="bg-black text-white px-5 py-2.5 rounded-full flex items-center gap-3 border-[2px] border-black shadow-[3px_4px_0px_0px_#FFF] mb-8">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#FFC629]">
-              Pitch Window
+          {/* Pitch Window Text Display */}
+          <div
+            id="match-pitch-timer"
+            className="flex flex-col items-center justify-center my-6 text-black select-none"
+          >
+            <span
+              id="match-pitch-label"
+              className="text-[12px] font-black uppercase tracking-[0.22em] text-black/75 flex items-center gap-1.5 mb-1"
+            >
+              <span className="w-2 h-2 rounded-full bg-black/80 animate-pulse inline-block" />
+              Pitch Window Closes In
             </span>
-            <span className="font-display font-extrabold text-[16px] text-white tracking-widest min-w-[70px]">
+            <span
+              id="match-pitch-countdown"
+              className="font-display font-[900] text-[34px] sm:text-[38px] text-black tracking-widest leading-none tabular-nums"
+            >
               {hours}:{minutes}:{seconds}
             </span>
           </div>
@@ -82,6 +122,5 @@ export function MatchOverlay({ matchedJob, onKeepSwiping, onGoToChat }: MatchOve
           </div>
         </motion.div>
       </motion.div>
-    </AnimatePresence>
   );
 }

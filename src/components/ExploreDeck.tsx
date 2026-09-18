@@ -3,6 +3,7 @@ import { motion, useMotionValue, useTransform, AnimatePresence } from 'motion/re
 import { X, Star, Heart, RotateCcw, Sparkles, Filter, Check, ChevronDown, Briefcase } from 'lucide-react';
 import { GigItem, GigCategory, GIG_CATEGORIES } from '../types';
 import { GiglyLogo } from './GiglyLogo';
+import { SuperlikeAnimation } from './SuperlikeAnimation';
 
 interface ExploreDeckProps {
   items: GigItem[];
@@ -25,7 +26,19 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [swipedIds, setSwipedIds] = useState<Set<string>>(new Set());
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  const [isSuperLiking, setIsSuperLiking] = useState<boolean>(false);
+  const [superLikedItem, setSuperLikedItem] = useState<GigItem | null>(null);
+  const [flyUpId, setFlyUpId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const superLikeTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (superLikeTimerRef.current) {
+        clearTimeout(superLikeTimerRef.current);
+      }
+    };
+  }, []);
 
   // Close dropdown when clicked outside
   useEffect(() => {
@@ -99,10 +112,31 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
   }, [items, swipedIds]);
 
   const handleCardSwipe = (direction: 'left' | 'right' | 'up') => {
-    if (availableItems.length === 0) return;
+    if (availableItems.length === 0 || isSuperLiking) return;
     const topCard = availableItems[0];
     setSwipedIds((prev) => new Set([...prev, topCard.id]));
     onSwipe(topCard, direction);
+  };
+
+  const handleSuperLike = () => {
+    if (availableItems.length === 0 || isSuperLiking) return;
+    const topCard = availableItems[0];
+    setIsSuperLiking(true);
+    setSuperLikedItem(topCard);
+    setFlyUpId(topCard.id);
+
+    if (superLikeTimerRef.current) {
+      clearTimeout(superLikeTimerRef.current);
+    }
+
+    // Celebrate with Super Like animation and fly the card up, then trigger match cleanly
+    superLikeTimerRef.current = setTimeout(() => {
+      setSwipedIds((prev) => new Set([...prev, topCard.id]));
+      setIsSuperLiking(false);
+      setFlyUpId(null);
+      setSuperLikedItem(null);
+      onSwipe(topCard, 'up');
+    }, 850);
   };
 
   const handleResetDeck = () => {
@@ -349,6 +383,7 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
                 job={job}
                 index={index}
                 isTop={isTop}
+                flyUp={job.id === flyUpId}
                 onSwipe={(dir) => handleCardSwipe(dir)}
               />
             );
@@ -358,37 +393,37 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
 
       {/* Control Buttons */}
       <div className="flex items-center justify-center gap-6 mt-5">
-        {/* Pass Button */}
+        {/* Pass / Not Interested Button */}
         <motion.button
           whileHover={{ scale: 1.08, y: -2 }}
           whileTap={{ scale: 0.92, y: 2 }}
           onClick={() => handleCardSwipe('left')}
-          disabled={visibleCards.length === 0}
-          title="Pass"
+          disabled={visibleCards.length === 0 || isSuperLiking}
+          title="Not Interested"
           className="w-14 h-14 rounded-full bg-white border-[2.5px] border-black flex items-center justify-center shadow-[3px_4px_0px_0px_#000] cursor-pointer disabled:opacity-40"
         >
           <X className="w-6 h-6 text-black stroke-[3]" />
         </motion.button>
 
-        {/* Priority Apply (Super Like) Button */}
+        {/* Priority Apply (Super Like) Button - Click only */}
         <motion.button
-          whileHover={{ scale: 1.08, y: -2 }}
-          whileTap={{ scale: 0.92, y: 2 }}
-          onClick={() => handleCardSwipe('up')}
-          disabled={visibleCards.length === 0}
-          title="Priority Apply"
-          className="w-11 h-11 rounded-full bg-white border-[2.5px] border-black flex items-center justify-center shadow-[3px_4px_0px_0px_#000] cursor-pointer disabled:opacity-40"
+          whileHover={{ scale: 1.1, y: -3 }}
+          whileTap={{ scale: 0.9, y: 2 }}
+          onClick={handleSuperLike}
+          disabled={visibleCards.length === 0 || isSuperLiking}
+          title="Super Like"
+          className="w-12 h-12 rounded-full bg-white border-[2.5px] border-black flex items-center justify-center shadow-[3px_4px_0px_0px_#000] cursor-pointer disabled:opacity-40 relative group"
         >
-          <Star className="w-5 h-5 text-black fill-[#FFC629] stroke-[2.2]" />
+          <Star className="w-6 h-6 text-black fill-[#FFC629] stroke-[2.2] group-hover:scale-110 transition-transform" />
         </motion.button>
 
-        {/* Like / Apply Button */}
+        {/* Like / Interested Button */}
         <motion.button
           whileHover={{ scale: 1.08, y: -2 }}
           whileTap={{ scale: 0.92, y: 2 }}
           onClick={() => handleCardSwipe('right')}
-          disabled={visibleCards.length === 0}
-          title="Apply / Match"
+          disabled={visibleCards.length === 0 || isSuperLiking}
+          title="Interested"
           className="w-14 h-14 rounded-full bg-[#FFC629] border-[2.5px] border-black flex items-center justify-center shadow-[3px_4px_0px_0px_#000] cursor-pointer disabled:opacity-40"
         >
           <Heart className="w-6 h-6 text-black fill-black stroke-[2.2]" />
@@ -399,6 +434,9 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
       <footer className="mt-6 text-center text-[10.5px] text-[#787878] font-medium leading-relaxed max-w-[340px]">
         Concept demo — when you match, the proposal window is held for 24 hours before opening to other applicants.
       </footer>
+
+      {/* Pop Super Like Celebration Overlay */}
+      <SuperlikeAnimation isVisible={isSuperLiking} item={superLikedItem} />
     </div>
   );
 }
@@ -408,24 +446,23 @@ interface SwipeCardProps {
   job: GigItem;
   index: number;
   isTop: boolean;
-  onSwipe: (dir: 'left' | 'right' | 'up') => void;
+  flyUp?: boolean;
+  onSwipe: (dir: 'left' | 'right') => void;
 }
 
-function SwipeCard({ job, index, isTop, onSwipe }: SwipeCardProps) {
+function SwipeCard({ job, index, isTop, flyUp = false, onSwipe }: SwipeCardProps) {
   const x = useMotionValue(0);
-  const y = useMotionValue(0);
 
   const rotate = useTransform(x, [-200, 200], [-18, 18]);
   const likeOpacity = useTransform(x, [15, 100], [0, 1]);
   const passOpacity = useTransform(x, [-15, -100], [0, 1]);
 
+  // Strictly horizontal dragging only (left or right). No swipe up from drag.
   const handleDragEnd = (_: any, info: any) => {
-    const threshold = 100;
-    const velocityThreshold = 500;
+    const threshold = 90;
+    const velocityThreshold = 450;
 
-    if (info.offset.y < -120 || info.velocity.y < -velocityThreshold) {
-      onSwipe('up');
-    } else if (info.offset.x > threshold || info.velocity.x > velocityThreshold) {
+    if (info.offset.x > threshold || info.velocity.x > velocityThreshold) {
       onSwipe('right');
     } else if (info.offset.x < -threshold || info.velocity.x < -velocityThreshold) {
       onSwipe('left');
@@ -439,17 +476,31 @@ function SwipeCard({ job, index, isTop, onSwipe }: SwipeCardProps) {
     <motion.div
       style={{
         x: isTop ? x : 0,
-        y: isTop ? y : depthOffset,
         rotate: isTop ? rotate : 0,
-        scale: depthScale,
         zIndex: 10 - index,
       }}
-      drag={isTop ? true : false}
-      dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
-      dragElastic={0.9}
+      initial={false}
+      animate={
+        flyUp
+          ? {
+              y: -750,
+              scale: 1.05,
+              opacity: 0,
+              transition: { duration: 0.55, ease: 'easeIn' },
+            }
+          : {
+              y: depthOffset,
+              scale: depthScale,
+              opacity: 1,
+              transition: { duration: 0.2 },
+            }
+      }
+      drag={isTop && !flyUp ? 'x' : false}
+      dragConstraints={{ left: 0, right: 0 }}
+      dragElastic={0.8}
       onDragEnd={handleDragEnd}
       className={`absolute inset-0 bg-white border-[3px] border-black rounded-[26px] p-5 sm:p-6 flex flex-col justify-between shadow-[8px_10px_0px_0px_#000] select-none ${
-        isTop ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'
+        isTop && !flyUp ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'
       }`}
     >
       {/* Stamps */}
@@ -457,15 +508,15 @@ function SwipeCard({ job, index, isTop, onSwipe }: SwipeCardProps) {
         <>
           <motion.div
             style={{ opacity: likeOpacity }}
-            className="absolute top-6 left-6 px-4 py-1.5 rounded-lg border-[3.5px] border-black bg-[#FFC629] text-black font-display font-[800] text-[24px] rotate-[-14deg] shadow-[2px_2px_0px_0px_#000] pointer-events-none z-20"
+            className="absolute top-6 left-6 px-3.5 py-1 rounded-lg border-[3.5px] border-black bg-[#FFC629] text-black font-display font-[800] text-[17px] sm:text-[19px] tracking-wide rotate-[-14deg] shadow-[2px_2px_0px_0px_#000] pointer-events-none z-20 whitespace-nowrap uppercase"
           >
-            YES
+            Interested
           </motion.div>
           <motion.div
             style={{ opacity: passOpacity }}
-            className="absolute top-6 right-6 px-4 py-1.5 rounded-lg border-[3.5px] border-black bg-black text-white font-display font-[800] text-[24px] rotate-[14deg] shadow-[2px_2px_0px_0px_#000] pointer-events-none z-20"
+            className="absolute top-6 right-6 px-3.5 py-1 rounded-lg border-[3.5px] border-black bg-black text-white font-display font-[800] text-[17px] sm:text-[19px] tracking-wide rotate-[14deg] shadow-[2px_2px_0px_0px_#000] pointer-events-none z-20 whitespace-nowrap uppercase"
           >
-            PASS
+            Not Interested
           </motion.div>
         </>
       )}
