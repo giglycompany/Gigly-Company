@@ -6,11 +6,10 @@ import { Check, Edit3, ShieldCheck, Star, LogOut, Mail, Tag } from 'lucide-react
 interface ProfileScreenProps {
   profile: UserProfile;
   onUpdateProfile: (updated: Partial<UserProfile>) => void;
-  onSwitchRole: () => void;
   onLogout?: () => void;
 }
 
-export function ProfileScreen({ profile, onUpdateProfile, onSwitchRole, onLogout }: ProfileScreenProps) {
+export function ProfileScreen({ profile, onUpdateProfile, onLogout }: ProfileScreenProps) {
   const [isEditing, setIsEditing] = useState(false);
 
   // Form states
@@ -57,12 +56,10 @@ export function ProfileScreen({ profile, onUpdateProfile, onSwitchRole, onLogout
                 : 'This is what freelancers see when you match.'}
             </p>
           </div>
-          <button
-            onClick={onSwitchRole}
-            className="px-3 py-1.5 bg-[#FFF9E6] border-2 border-black rounded-full text-[11px] font-bold text-black shadow-[2px_2px_0px_0px_#000] hover:bg-[#FFC629] transition-colors"
-          >
-            Switch to {profile.role === 'freelancer' ? 'Business' : 'Freelancer'}
-          </button>
+          <div className="px-3 py-1.5 bg-[#FFF9E6] border-2 border-black rounded-full text-[11px] font-extrabold text-black shadow-[2px_2px_0px_0px_#000] flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-[#0D6832]" />
+            <span className="capitalize">{profile.role === 'freelancer' ? 'Freelancer' : 'Business'}</span>
+          </div>
         </div>
       </header>
 

@@ -42,6 +42,7 @@ export interface GigItem {
   proposals: string;
   hot: boolean;
   avatarBg?: string;
+  type?: 'job' | 'candidate';
 }
 
 export interface ChatMessage {

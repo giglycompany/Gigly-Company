@@ -6,7 +6,6 @@ import {
   MatchRecord,
   UserProfile,
 } from './types';
-import { INITIAL_JOBS, INITIAL_CANDIDATES } from './data/mockData';
 import {
   auth,
   seedInitialFirestoreData,
@@ -37,9 +36,10 @@ export default function App() {
   const [userRole, setUserRole] = useState<'freelancer' | 'business'>('freelancer');
   const [currentUserId, setCurrentUserId] = useState<string>('guest-user');
 
-  // Deck Items State
-  const [jobs, setJobs] = useState<GigItem[]>(INITIAL_JOBS);
-  const [candidates, setCandidates] = useState<GigItem[]>(INITIAL_CANDIDATES);
+  // Deck Items State (STRICTLY EMPTY for logged in users - NO fake/mock profiles)
+  const [jobs, setJobs] = useState<GigItem[]>([]);
+  const [candidates, setCandidates] = useState<GigItem[]>([]);
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
 
   // Matches & Chat State with user-isolated persistence
   const [matches, setMatches] = useState<MatchRecord[]>([]);
@@ -208,7 +208,7 @@ export default function App() {
     } else if (role) {
       handleSelectRole(role);
     } else {
-      setCurrentScreen('roleSelect');
+      setCurrentScreen('onboarding');
     }
   };
 
@@ -249,10 +249,10 @@ export default function App() {
     setCurrentScreen('auth');
   };
 
-  // Handle Profile Updates
+  // Handle Profile Updates (keeps profile strictly locked to single role chosen at start)
   const handleUpdateProfile = (updated: Partial<UserProfile>) => {
     setProfile((prev) => {
-      const next = { ...prev, ...updated };
+      const next = { ...prev, ...updated, role: prev.role };
       const uid = auth.currentUser?.uid || currentUserId;
       if (uid && uid !== 'guest-user') {
         saveUserProfileToFirestore(uid, next);
@@ -267,28 +267,25 @@ export default function App() {
   // Handle Role Selection
   const handleSelectRole = (role: 'freelancer' | 'business') => {
     setUserRole(role);
-    const updatedProfile: UserProfile = {
-      ...profile,
-      role: role,
-      roleTitle:
-        role === 'freelancer' ? 'Product & Frontend Designer' : 'Bramble Co. · Digital Agency',
-      rateOrBudget: role === 'freelancer' ? '$55–70 / hr' : '$900–3,000 / project',
-      bio:
-        role === 'freelancer'
-          ? 'I design and build product interfaces end to end — from Figma flows to shipped React.'
-          : 'We are a boutique studio partnering with talented freelancers for design, dev, and growth.',
-      skills:
-        role === 'freelancer'
-          ? ['Figma', 'React', 'Design systems', 'UX writing']
-          : ['Design', 'Development', 'Copywriting', 'Automation'],
-      stats: {
-        appliedOrPosted: role === 'freelancer' ? 18 : 6,
-        hired: role === 'freelancer' ? 5 : 3,
-        ratingOrResponse: role === 'freelancer' ? '96%' : '4.9★',
-      },
-    };
-    setProfile(updatedProfile);
-    saveUserProfileToFirestore(currentUserId, updatedProfile);
+    setProfile((prev) => {
+      const updatedProfile: UserProfile = {
+        ...prev,
+        role: role,
+        roleTitle:
+          prev.roleTitle ||
+          (role === 'freelancer' ? 'Product & Frontend Designer' : 'Design & Tech Studio'),
+        rateOrBudget:
+          prev.rateOrBudget || (role === 'freelancer' ? '$55–70 / hr' : '$1,000–3,000 / project'),
+      };
+      const uid = auth.currentUser?.uid || currentUserId;
+      if (uid && uid !== 'guest-user') {
+        saveUserProfileToFirestore(uid, updatedProfile);
+        try {
+          localStorage.setItem(`gigly_profile_${uid}`, JSON.stringify(updatedProfile));
+        } catch {}
+      }
+      return updatedProfile;
+    });
     setCurrentScreen('explore');
   };
 
@@ -343,15 +340,25 @@ export default function App() {
 
   // Reshuffle Deck
   const handleReshuffle = () => {
-    if (userRole === 'freelancer') {
-      setJobs([...INITIAL_JOBS]);
-    } else {
-      setCandidates([...INITIAL_CANDIDATES]);
-    }
+    // Deck reshuffle resets viewed cards without injecting fake profiles
   };
 
   // Count unread messages
   const unreadMessagesCount = matches.filter((m) => m.messages.length === 0).length;
+
+  // Guard Admin Dashboard access with verified admin session
+  useEffect(() => {
+    if (currentScreen === 'admin') {
+      try {
+        const authed = sessionStorage.getItem('gigly_admin_session');
+        if (authed !== 'true') {
+          setCurrentScreen('auth');
+        }
+      } catch {
+        setCurrentScreen('auth');
+      }
+    }
+  }, [currentScreen]);
 
   return (
     <div className="min-h-screen bg-[#FFFCF5] flex justify-center text-[#1A1A1A]">
@@ -386,9 +393,16 @@ export default function App() {
       {/* 4. ADMIN DASHBOARD */}
       {currentScreen === 'admin' && (
         <AdminDashboard
-          onBackToApp={() => setCurrentScreen('explore')}
+          onBackToApp={() => {
+            try {
+              sessionStorage.removeItem('gigly_admin_session');
+            } catch {}
+            setCurrentScreen('auth');
+          }}
           matches={matches}
           currentProfile={profile}
+          jobs={jobs}
+          candidates={candidates}
         />
       )}
 
@@ -471,10 +485,6 @@ export default function App() {
                   profile={profile}
                   onUpdateProfile={handleUpdateProfile}
                   onLogout={handleLogout}
-                  onSwitchRole={() => {
-                    const newRole = userRole === 'freelancer' ? 'business' : 'freelancer';
-                    handleSelectRole(newRole);
-                  }}
                 />
               </motion.div>
             )}

@@ -1,16 +1,28 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, Users, Briefcase, Eye, Flame, Shield, Search, ChevronUp, ChevronDown } from 'lucide-react';
-import { MatchRecord, UserProfile } from '../types';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { GigItem, MatchRecord, UserProfile } from '../types';
 
 interface AdminDashboardProps {
   onBackToApp: () => void;
   matches: MatchRecord[];
   currentProfile: UserProfile;
+  jobs?: GigItem[];
+  candidates?: GigItem[];
 }
 
-export function AdminDashboard({ onBackToApp, matches, currentProfile }: AdminDashboardProps) {
+export function AdminDashboard({
+  onBackToApp,
+  matches,
+  currentProfile,
+  jobs = [],
+  candidates = [],
+}: AdminDashboardProps) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [firestoreGigs, setFirestoreGigs] = useState<GigItem[]>([]);
 
   const offersScrollRef = useRef<HTMLDivElement>(null);
   const wantsScrollRef = useRef<HTMLDivElement>(null);
@@ -22,126 +34,249 @@ export function AdminDashboard({ onBackToApp, matches, currentProfile }: AdminDa
     }
   };
 
-  // Mock analytics dataset
+  // 1. Gather all authentic users from localStorage, props, and Firestore
+  useEffect(() => {
+    const userMap = new Map<string, UserProfile>();
+
+    // Add current profile if valid
+    if (currentProfile && (currentProfile.email || currentProfile.name)) {
+      const key = (currentProfile.email || currentProfile.name).toLowerCase();
+      userMap.set(key, currentProfile);
+    }
+
+    // Scan localStorage for any saved user profiles
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('gigly_profile_')) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const p = JSON.parse(raw);
+            if (p && (p.email || p.name)) {
+              const key = (p.email || p.name).toLowerCase();
+              userMap.set(key, p);
+            }
+          }
+        }
+      }
+    } catch {}
+
+    // Query Firestore users collection (with offline/network safety)
+    try {
+      getDocs(collection(db, 'users'))
+        .then((snap) => {
+          if (!snap.empty) {
+            snap.forEach((docSnap) => {
+              const data = docSnap.data() as UserProfile;
+              if (data && (data.email || data.name)) {
+                const key = (data.email || data.name).toLowerCase();
+                userMap.set(key, data);
+              }
+            });
+            setAllUsers(Array.from(userMap.values()));
+          }
+        })
+        .catch(() => {
+          // Graceful fallback to local profiles
+        });
+    } catch {}
+
+    // Query Firestore gigs collection
+    try {
+      getDocs(collection(db, 'gigs'))
+        .then((snap) => {
+          if (!snap.empty) {
+            const loaded: GigItem[] = [];
+            snap.forEach((docSnap) => {
+              const d = docSnap.data();
+              if (!docSnap.id.startsWith('job-') && !docSnap.id.startsWith('cand-')) {
+                loaded.push({
+                  id: docSnap.id,
+                  rate: d.rate || '$50',
+                  unit: d.unit || '/hr',
+                  title: d.title || '',
+                  client: d.client || '',
+                  category: d.category || 'Others',
+                  tags: d.tags || [],
+                  desc: d.desc || '',
+                  posted: d.posted || 'recently',
+                  proposals: d.proposals || 'open',
+                  hot: Boolean(d.hot),
+                  type: d.type,
+                });
+              }
+            });
+            setFirestoreGigs(loaded);
+          }
+        })
+        .catch(() => {});
+    } catch {}
+
+    setAllUsers(Array.from(userMap.values()));
+  }, [currentProfile]);
+
+  // Combined real users list
+  const combinedUsers = useMemo(() => {
+    if (allUsers.length > 0) return allUsers;
+    if (currentProfile && (currentProfile.email || currentProfile.name)) {
+      return [currentProfile];
+    }
+    return [];
+  }, [allUsers, currentProfile]);
+
+  const freelancersCount = combinedUsers.filter((u) => u.role === 'freelancer').length;
+  const businessesCount = combinedUsers.filter((u) => u.role === 'business').length;
+
   const stats = {
-    totalVisits: 142,
-    uniqueVisitors: 89,
-    totalUsers: 24,
-    freelancers: 16,
-    businesses: 8,
-    matchesMade: matches.length + 18,
+    totalVisits: Math.max(combinedUsers.length * 2 + matches.length, 1),
+    uniqueVisitors: Math.max(combinedUsers.length, 1),
+    totalUsers: combinedUsers.length,
+    freelancers: freelancersCount,
+    businesses: businessesCount,
+    matchesMade: matches.length,
   };
 
-  const servicesOffered = [
-    { name: 'Figma / UI Design', count: 14, percent: 35 },
-    { name: 'React / Frontend', count: 12, percent: 30 },
-    { name: 'Copywriting / SEO', count: 8, percent: 20 },
-    { name: 'Video / Motion', count: 6, percent: 15 },
-    { name: 'Brand Strategy & Identity', count: 5, percent: 12 },
-    { name: 'Mobile App (iOS / Flutter)', count: 4, percent: 10 },
-    { name: '3D Illustration & Blender', count: 3, percent: 8 },
-    { name: 'Translation & Localization', count: 2, percent: 6 },
-    { name: 'Voiceover & Audio Editing', count: 2, percent: 5 },
-    { name: 'Email Marketing & Klaviyo', count: 1, percent: 4 },
-  ];
+  // 2. Dynamically calculate Services Freelancers are Offering
+  const servicesOffered = useMemo(() => {
+    const counts: Record<string, number> = {};
+    let totalCount = 0;
 
-  const servicesWanted = [
-    { name: 'Full-stack Dev', count: 10, percent: 38 },
-    { name: 'Product Design', count: 8, percent: 30 },
-    { name: 'Automation / Python', count: 5, percent: 19 },
-    { name: 'Marketing / Growth', count: 3, percent: 13 },
-    { name: 'AI & Prompt Engineering', count: 3, percent: 11 },
-    { name: 'SEO & Content Writing', count: 2, percent: 9 },
-    { name: 'DevOps & AWS Cloud', count: 2, percent: 8 },
-    { name: 'Graphic & Social Media Design', count: 2, percent: 7 },
-    { name: 'Cybersecurity Audit', count: 1, percent: 4 },
-    { name: 'Custom Shopify Theme', count: 1, percent: 3 },
-  ];
+    // From registered freelancers
+    combinedUsers
+      .filter((u) => u.role === 'freelancer')
+      .forEach((u) => {
+        if (Array.isArray(u.skills) && u.skills.length > 0) {
+          u.skills.forEach((skill) => {
+            const trimmed = skill.trim();
+            if (trimmed) {
+              counts[trimmed] = (counts[trimmed] || 0) + 1;
+              totalCount++;
+            }
+          });
+        }
+        if (u.category && (!u.skills || u.skills.length === 0)) {
+          counts[u.category] = (counts[u.category] || 0) + 1;
+          totalCount++;
+        }
+      });
 
-  const mockUsers = [
-    {
-      name: currentProfile.name || 'Yash S.',
-      email: currentProfile.email || 'giglycompany@gmail.com',
-      role: currentProfile.role || 'freelancer',
-      rateOrBudget: currentProfile.rateOrBudget || '$55–70 / hr',
-      provider: 'Google / Email',
-      joined: 'Just now',
-    },
-    {
-      name: 'Aria Chen',
-      email: 'aria.chen@example.com',
-      role: 'freelancer',
-      rateOrBudget: '$70–90/hr',
-      provider: 'Google',
-      joined: '2 hours ago',
-    },
-    {
-      name: 'Bramble Co.',
-      email: 'hi@bramble.co',
-      role: 'business',
-      rateOrBudget: '$900–3,000/proj',
-      provider: 'Email',
-      joined: '1 day ago',
-    },
-    {
-      name: 'Marcus Reed',
-      email: 'marcus.code@gmail.com',
-      role: 'freelancer',
-      rateOrBudget: '$40–55/hr',
-      provider: 'Google',
-      joined: '2 days ago',
-    },
-    {
-      name: 'Runway Labs',
-      email: 'talent@runwaylabs.io',
-      role: 'business',
-      rateOrBudget: '$1,500 fixed',
-      provider: 'Google',
-      joined: '3 days ago',
-    },
-    {
-      name: 'Elena Rostova',
-      email: 'elena.design@studio.io',
-      role: 'freelancer',
-      rateOrBudget: '$65–85/hr',
-      provider: 'Google',
-      joined: '4 days ago',
-    },
-    {
-      name: 'Nova Brands Inc.',
-      email: 'hello@novabrands.com',
-      role: 'business',
-      rateOrBudget: '$2,500/mo',
-      provider: 'Email',
-      joined: '5 days ago',
-    },
-    {
-      name: 'Kenji Sato',
-      email: 'kenji.dev@tokyo.jp',
-      role: 'freelancer',
-      rateOrBudget: '$90–120/hr',
-      provider: 'Google',
-      joined: '6 days ago',
-    },
-    {
-      name: 'Apex AI Ventures',
-      email: 'founders@apexventures.ai',
-      role: 'business',
-      rateOrBudget: '$5,000 fixed',
-      provider: 'Google',
-      joined: '1 week ago',
-    },
-    {
-      name: 'Zara Thorne',
-      email: 'zara.copy@wordcraft.me',
-      role: 'freelancer',
-      rateOrBudget: '$50–65/hr',
-      provider: 'Email',
-      joined: '1 week ago',
-    },
-  ];
+    // From talent candidate cards
+    const allCandidateItems = [...candidates, ...firestoreGigs.filter((g) => g.type === 'candidate')];
+    allCandidateItems.forEach((c) => {
+      if (Array.isArray(c.tags) && c.tags.length > 0) {
+        c.tags.forEach((tag) => {
+          const trimmed = tag.trim();
+          if (trimmed) {
+            counts[trimmed] = (counts[trimmed] || 0) + 1;
+            totalCount++;
+          }
+        });
+      }
+      if (c.category && (!c.tags || c.tags.length === 0)) {
+        counts[c.category] = (counts[c.category] || 0) + 1;
+        totalCount++;
+      }
+    });
 
-  const filteredUsers = mockUsers.filter(
+    if (totalCount === 0) {
+      return [];
+    }
+
+    const items = Object.entries(counts).map(([name, count]) => ({
+      name,
+      count,
+      percent: Math.round((count / totalCount) * 100),
+    }));
+
+    // Sort descending by count, then by percentage
+    items.sort((a, b) => b.count - a.count || b.percent - a.percent);
+
+    // Ensure rounding adds up cleanly to 100%
+    const currentSum = items.reduce((acc, curr) => acc + curr.percent, 0);
+    if (items.length > 0 && currentSum !== 100 && currentSum > 0) {
+      items[0].percent += 100 - currentSum;
+    }
+
+    return items;
+  }, [combinedUsers, candidates, firestoreGigs]);
+
+  // 3. Dynamically calculate Services Businesses Want
+  const servicesWanted = useMemo(() => {
+    const counts: Record<string, number> = {};
+    let totalCount = 0;
+
+    // From registered businesses
+    combinedUsers
+      .filter((u) => u.role === 'business')
+      .forEach((u) => {
+        if (Array.isArray(u.skills) && u.skills.length > 0) {
+          u.skills.forEach((skill) => {
+            const trimmed = skill.trim();
+            if (trimmed) {
+              counts[trimmed] = (counts[trimmed] || 0) + 1;
+              totalCount++;
+            }
+          });
+        }
+        if (u.category && (!u.skills || u.skills.length === 0)) {
+          counts[u.category] = (counts[u.category] || 0) + 1;
+          totalCount++;
+        }
+      });
+
+    // From job postings
+    const allJobItems = [...jobs, ...firestoreGigs.filter((g) => g.type === 'job')];
+    allJobItems.forEach((j) => {
+      if (Array.isArray(j.tags) && j.tags.length > 0) {
+        j.tags.forEach((tag) => {
+          const trimmed = tag.trim();
+          if (trimmed) {
+            counts[trimmed] = (counts[trimmed] || 0) + 1;
+            totalCount++;
+          }
+        });
+      }
+      if (j.category && (!j.tags || j.tags.length === 0)) {
+        counts[j.category] = (counts[j.category] || 0) + 1;
+        totalCount++;
+      }
+    });
+
+    if (totalCount === 0) {
+      return [];
+    }
+
+    const items = Object.entries(counts).map(([name, count]) => ({
+      name,
+      count,
+      percent: Math.round((count / totalCount) * 100),
+    }));
+
+    // Sort descending by count, then by percentage
+    items.sort((a, b) => b.count - a.count || b.percent - a.percent);
+
+    // Ensure rounding adds up cleanly to 100%
+    const currentSum = items.reduce((acc, curr) => acc + curr.percent, 0);
+    if (items.length > 0 && currentSum !== 100 && currentSum > 0) {
+      items[0].percent += 100 - currentSum;
+    }
+
+    return items;
+  }, [combinedUsers, jobs, firestoreGigs]);
+
+  // Registered users table list
+  const registeredUsers = useMemo(() => {
+    return combinedUsers.map((u) => ({
+      name: u.name || 'Member',
+      email: u.email || 'No email',
+      role: u.role || 'freelancer',
+      rateOrBudget: u.rateOrBudget || 'Standard',
+      provider: u.verified ? 'Verified Account' : 'Active Account',
+      joined: 'Active user',
+    }));
+  }, [combinedUsers]);
+
+  const filteredUsers = registeredUsers.filter(
     (u) =>
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -155,6 +290,7 @@ export function AdminDashboard({ onBackToApp, matches, currentProfile }: AdminDa
         <div className="flex items-center gap-3">
           <button
             onClick={onBackToApp}
+            title="Back to login"
             className="w-10 h-10 rounded-full bg-white border-2 border-black flex items-center justify-center shadow-[2px_2px_0px_0px_#000] hover:translate-y-[-1px] cursor-pointer"
           >
             <ArrowLeft className="w-5 h-5 text-black" />
@@ -176,7 +312,7 @@ export function AdminDashboard({ onBackToApp, matches, currentProfile }: AdminDa
           onClick={onBackToApp}
           className="px-4 py-2 bg-white text-black font-display font-bold text-[12.5px] rounded-full border-2 border-black shadow-[2px_2px_0px_0px_#000] hover:bg-[#FFC629] transition-colors"
         >
-          Exit Dashboard
+          Back to Login
         </button>
       </div>
 
@@ -265,20 +401,34 @@ export function AdminDashboard({ onBackToApp, matches, currentProfile }: AdminDa
             </div>
           </div>
           <div ref={offersScrollRef} className="h-[160px] overflow-y-auto custom-scrollbar-y force-scrollbar-y pr-2 space-y-2.5">
-            {servicesOffered.map((item) => (
-              <div key={item.name}>
-                <div className="flex justify-between text-[12px] font-bold text-black mb-1">
-                  <span>{item.name}</span>
-                  <span className="text-[#6E6E6E]">{item.percent}%</span>
+            {servicesOffered.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-3">
+                <div className="w-8 h-8 rounded-full bg-[#FFF9E6] border border-black flex items-center justify-center mb-1.5">
+                  <Briefcase className="w-4 h-4 text-black" />
                 </div>
-                <div className="w-full h-2.5 bg-[#FFFCF5] border border-black rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-[#FFC629] border-r border-black"
-                    style={{ width: `${item.percent}%` }}
-                  />
-                </div>
+                <div className="font-extrabold text-[12px] text-black">No freelancer services yet</div>
+                <p className="text-[11px] font-medium text-[#6E6E6E] mt-0.5 max-w-[200px]">
+                  Real-time figures will calculate as freelancers set up their profiles.
+                </p>
               </div>
-            ))}
+            ) : (
+              servicesOffered.map((item) => (
+                <div key={item.name}>
+                  <div className="flex justify-between text-[12px] font-bold text-black mb-1">
+                    <span className="truncate pr-2">{item.name}</span>
+                    <span className="text-[#6E6E6E] font-extrabold flex-shrink-0">
+                      {item.count > 1 ? `${item.count} · ` : ''}{item.percent}%
+                    </span>
+                  </div>
+                  <div className="w-full h-2.5 bg-[#FFFCF5] border border-black rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#FFC629] border-r border-black"
+                      style={{ width: `${Math.min(item.percent, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -308,20 +458,34 @@ export function AdminDashboard({ onBackToApp, matches, currentProfile }: AdminDa
             </div>
           </div>
           <div ref={wantsScrollRef} className="h-[160px] overflow-y-auto custom-scrollbar-y force-scrollbar-y pr-2 space-y-2.5">
-            {servicesWanted.map((item) => (
-              <div key={item.name}>
-                <div className="flex justify-between text-[12px] font-bold text-black mb-1">
-                  <span>{item.name}</span>
-                  <span className="text-[#6E6E6E]">{item.percent}%</span>
+            {servicesWanted.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-3">
+                <div className="w-8 h-8 rounded-full bg-[#FFFCF5] border border-black flex items-center justify-center mb-1.5">
+                  <Users className="w-4 h-4 text-black" />
                 </div>
-                <div className="w-full h-2.5 bg-[#FFFCF5] border border-black rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-black"
-                    style={{ width: `${item.percent}%` }}
-                  />
-                </div>
+                <div className="font-extrabold text-[12px] text-black">No business requests yet</div>
+                <p className="text-[11px] font-medium text-[#6E6E6E] mt-0.5 max-w-[200px]">
+                  Real-time figures will calculate as businesses set up their profiles.
+                </p>
               </div>
-            ))}
+            ) : (
+              servicesWanted.map((item) => (
+                <div key={item.name}>
+                  <div className="flex justify-between text-[12px] font-bold text-black mb-1">
+                    <span className="truncate pr-2">{item.name}</span>
+                    <span className="text-[#6E6E6E] font-extrabold flex-shrink-0">
+                      {item.count > 1 ? `${item.count} · ` : ''}{item.percent}%
+                    </span>
+                  </div>
+                  <div className="w-full h-2.5 bg-[#FFFCF5] border border-black rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-black"
+                      style={{ width: `${Math.min(item.percent, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

@@ -76,7 +76,7 @@ export function RoleSelectScreen({ onSelectRole }: RoleSelectScreenProps) {
 
       <div className="text-center mt-8">
         <p className="text-[11px] font-semibold text-[#8E8E8E]">
-          You can switch modes or edit your profile at any time.
+          Your profile will be permanently linked to your chosen account type.
         </p>
       </div>
     </motion.div>

@@ -16,6 +16,7 @@ import {
   orderBy,
   updateDoc,
   getDocFromServer,
+  deleteDoc,
   setLogLevel,
 } from 'firebase/firestore';
 
@@ -36,7 +37,6 @@ import {
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { GigItem, MatchRecord, UserProfile } from '../types';
-import { INITIAL_JOBS, INITIAL_CANDIDATES } from '../data/mockData';
 
 // Initialize Firebase App
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -195,37 +195,44 @@ export async function testConnection() {
 }
 
 /**
- * Seed initial mock gigs and candidate talent into Firestore if collection is empty
+ * Purge mock/fake gigs or profiles from Firestore collection
  */
-export async function seedInitialFirestoreData() {
+export async function purgeFakeDataFromFirestore() {
   try {
     const gigsCol = collection(db, 'gigs');
-    // Set a quick timeout so slow connections or offline mode don't stall execution
-    const snapshotPromise = getDocs(gigsCol);
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), 2500)
-    );
-    const snapshot = await Promise.race([snapshotPromise, timeoutPromise]);
-    if (snapshot && snapshot.empty) {
-      const allItems = [
-        ...INITIAL_JOBS.map((j) => ({ ...j, type: 'job' })),
-        ...INITIAL_CANDIDATES.map((c) => ({ ...c, type: 'candidate' })),
-      ];
-
-      for (const item of allItems) {
-        await setDoc(doc(db, 'gigs', item.id), {
-          ...item,
-          createdAt: serverTimestamp(),
-        });
-      }
+    const snapshot = await getDocs(gigsCol);
+    if (!snapshot.empty) {
+      const deletePromises: Promise<void>[] = [];
+      snapshot.forEach((docSnap) => {
+        const docId = docSnap.id;
+        // Check if doc matches any mock id or format
+        if (
+          docId.startsWith('job-') ||
+          docId.startsWith('cand-') ||
+          docSnap.data().isMock ||
+          docSnap.data().isFake
+        ) {
+          deletePromises.push(deleteDoc(doc(db, 'gigs', docId)));
+        }
+      });
+      await Promise.all(deletePromises);
     }
   } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, 'gigs');
+    // Ignore cleanup warnings
   }
 }
 
 /**
+ * Seed initial data if required (no mock data seeded)
+ */
+export async function seedInitialFirestoreData() {
+  // Purge any residual mock/fake profiles so database strictly has real users
+  await purgeFakeDataFromFirestore();
+}
+
+/**
  * Real-time listener for gigs or talent profiles from Firestore
+ * Strictly returns authentic profiles from the database
  */
 export function subscribeToGigs(
   role: 'freelancer' | 'business',
@@ -233,9 +240,6 @@ export function subscribeToGigs(
 ) {
   const targetType = role === 'freelancer' ? 'job' : 'candidate';
   const pathForQuery = 'gigs';
-
-  // Immediately provide initial mock data so the app displays cards instantly without network lag
-  onUpdate(role === 'freelancer' ? INITIAL_JOBS : INITIAL_CANDIDATES);
 
   try {
     const q = query(collection(db, pathForQuery), where('type', '==', targetType));
@@ -247,6 +251,10 @@ export function subscribeToGigs(
           const loaded: GigItem[] = [];
           snapshot.forEach((docSnap) => {
             const data = docSnap.data();
+            // Filter out any lingering mock IDs
+            if (docSnap.id.startsWith('job-') || docSnap.id.startsWith('cand-')) {
+              return;
+            }
             loaded.push({
               id: docSnap.id,
               rate: data.rate || '$50',
@@ -262,16 +270,20 @@ export function subscribeToGigs(
             });
           });
           onUpdate(loaded);
+        } else {
+          onUpdate([]);
         }
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, pathForQuery);
+        onUpdate([]);
       }
     );
 
     return unsubscribe;
   } catch (e) {
     handleFirestoreError(e, OperationType.GET, pathForQuery);
+    onUpdate([]);
     return () => {};
   }
 }

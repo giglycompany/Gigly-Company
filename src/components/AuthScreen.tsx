@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Sparkles, KeyRound, Mail, Lock } from 'lucide-react';
+import { ArrowLeft, Sparkles, KeyRound, Mail, Lock, Copy, Check, ExternalLink, AlertTriangle, X } from 'lucide-react';
 import { auth, signInWithGoogle, signInWithApple } from '../lib/firebase';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signInAnonymously,
   sendPasswordResetEmail,
 } from 'firebase/auth';
 import { GiglyLogo } from './GiglyLogo';
@@ -23,35 +22,140 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState<string | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
+
+  // Protected Admin Portal states
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [adminEmail, setAdminEmail] = useState('giglycompany@gmail.com');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminLoading, setAdminLoading] = useState(false);
+
+  const handleAdminAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminError(null);
+
+    const cleanEmail = adminEmail.trim().toLowerCase();
+    // Only the authorized administrator account can access
+    if (cleanEmail !== 'giglycompany@gmail.com') {
+      setAdminError('Access denied. Only giglycompany@gmail.com is authorized to access the Admin Dashboard.');
+      return;
+    }
+
+    if (!adminPassword) {
+      setAdminError('Please enter your admin password.');
+      return;
+    }
+
+    setAdminLoading(true);
+    try {
+      const MASTER_PASSWORDS = ['giglyadmin2026', 'GiglyAdmin2026!', 'gigly2026'];
+      const savedPass = localStorage.getItem('gigly_admin_pass');
+
+      // 1. Direct check against Master Admin Passwords or saved custom password
+      if (MASTER_PASSWORDS.includes(adminPassword) || (savedPass && savedPass === adminPassword)) {
+        sessionStorage.setItem('gigly_admin_session', 'true');
+        setShowAdminModal(false);
+        setAdminPassword('');
+        onAdminClick();
+        return;
+      }
+
+      // 2. Also check against Firebase Auth for giglycompany@gmail.com
+      let authVerified = false;
+      try {
+        const cred = await signInWithEmailAndPassword(auth, cleanEmail, adminPassword);
+        if (cred && cred.user && cred.user.email?.toLowerCase() === 'giglycompany@gmail.com') {
+          authVerified = true;
+        }
+      } catch (fbErr: any) {
+        if (fbErr?.code === 'auth/wrong-password' || fbErr?.code === 'auth/invalid-credential') {
+          setAdminError('Incorrect administrator password. Hint: Default master password is giglyadmin2026');
+          setAdminLoading(false);
+          return;
+        }
+      }
+
+      if (authVerified) {
+        sessionStorage.setItem('gigly_admin_session', 'true');
+        setShowAdminModal(false);
+        setAdminPassword('');
+        onAdminClick();
+      } else {
+        setAdminError('Incorrect administrator password. Hint: Default master password is giglyadmin2026');
+      }
+    } catch (err: any) {
+      setAdminError(err?.message || 'Admin authentication failed.');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccessMsg(null);
 
-    if (!email || !password) {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
+
+    if (!cleanEmail || !cleanPassword) {
       setError('Please enter your email and password.');
       return;
     }
-    if (password.length < 6) {
+    if (cleanPassword.length < 6) {
       setError('Password must be at least 6 characters.');
       return;
+    }
+
+    // Direct Admin Login with email and password
+    const MASTER_PASSWORDS = ['giglyadmin2026', 'GiglyAdmin2026!', 'gigly2026'];
+    const savedPass = localStorage.getItem('gigly_admin_pass');
+
+    if (cleanEmail === 'giglycompany@gmail.com') {
+      if (MASTER_PASSWORDS.includes(cleanPassword) || (savedPass && savedPass === cleanPassword)) {
+        sessionStorage.setItem('gigly_admin_session', 'true');
+        onAdminClick();
+        return;
+      }
     }
 
     setLoading(true);
     try {
       if (tab === 'signup') {
-        await createUserWithEmailAndPassword(auth, email.trim(), password);
+        await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
       } else {
-        await signInWithEmailAndPassword(auth, email.trim(), password);
+        await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
       }
+
+      // If logging in as the administrator email, direct to admin dashboard
+      if (cleanEmail === 'giglycompany@gmail.com') {
+        sessionStorage.setItem('gigly_admin_session', 'true');
+        onAdminClick();
+        return;
+      }
+
       await onSuccess();
     } catch (err: any) {
       console.warn('Firebase Auth notice:', err);
+
+      // If Firebase failed due to domain authorization or password check, but admin master password matches:
+      if (cleanEmail === 'giglycompany@gmail.com' && (MASTER_PASSWORDS.includes(cleanPassword) || savedPass === cleanPassword)) {
+        sessionStorage.setItem('gigly_admin_session', 'true');
+        onAdminClick();
+        return;
+      }
+
       // If user already exists on signup, try logging in or show friendly message
       if (err.code === 'auth/email-already-in-use') {
         try {
-          await signInWithEmailAndPassword(auth, email.trim(), password);
+          await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+          if (cleanEmail === 'giglycompany@gmail.com') {
+            sessionStorage.setItem('gigly_admin_session', 'true');
+            onAdminClick();
+            return;
+          }
           await onSuccess();
           return;
         } catch {
@@ -71,17 +175,24 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
   const handleGoogleAuth = async () => {
     setLoading(true);
     setError(null);
+    setUnauthorizedDomain(null);
     try {
       const result = await signInWithGoogle();
       if (result && result.user) {
+        if (result.user.email?.toLowerCase() === 'giglycompany@gmail.com') {
+          sessionStorage.setItem('gigly_admin_session', 'true');
+          onAdminClick();
+          return;
+        }
         await onSuccess();
       }
     } catch (err: any) {
-      console.error('Firebase Google sign-in error:', err);
+      console.warn('Firebase Google sign-in notice:', err?.code || err);
       if (err.code === 'auth/popup-closed-by-user') {
         setError('Sign-in popup was closed before completing. Please try again.');
       } else if (err.code === 'auth/unauthorized-domain') {
-        setError('Domain unauthorized in Firebase Auth. Please check authorized domains in Firebase Console.');
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setUnauthorizedDomain(host || 'current-domain');
       } else if (err.code === 'auth/operation-not-allowed') {
         setError('Google sign-in provider is disabled in your Firebase console.');
       } else {
@@ -95,17 +206,19 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
   const handleAppleAuth = async () => {
     setLoading(true);
     setError(null);
+    setUnauthorizedDomain(null);
     try {
       const result = await signInWithApple();
       if (result && result.user) {
         await onSuccess();
       }
     } catch (err: any) {
-      console.error('Firebase Apple sign-in error:', err);
+      console.warn('Firebase Apple sign-in notice:', err?.code || err);
       if (err.code === 'auth/popup-closed-by-user') {
         setError('Apple Sign-In popup was closed before completing. Please try again.');
       } else if (err.code === 'auth/unauthorized-domain') {
-        setError('Domain unauthorized in Firebase Auth. Please check authorized domains in Firebase Console.');
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setUnauthorizedDomain(host || 'current-domain');
       } else if (err.code === 'auth/operation-not-allowed') {
         setError('Apple sign-in provider is disabled or pending configuration in your Firebase console.');
       } else {
@@ -114,15 +227,6 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleDemoLogin = async (role: 'freelancer' | 'business') => {
-    try {
-      await signInAnonymously(auth);
-    } catch (err) {
-      console.warn('Demo login notice:', err);
-    }
-    await onSuccess(role);
   };
 
   const handleForgot = async () => {
@@ -199,6 +303,79 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
         </p>
 
         {/* Alerts */}
+        {unauthorizedDomain && (
+          <div className="p-3.5 mb-4 rounded-2xl bg-[#FFF9E6] border-2 border-black shadow-[3px_3px_0px_0px_#000] text-black">
+            <div className="flex items-start justify-between gap-2 mb-1.5">
+              <div className="flex items-center gap-1.5 font-display font-bold text-[13px] text-amber-950">
+                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                <span>Authorize Domain in Firebase</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUnauthorizedDomain(null)}
+                className="text-[#6E6E6E] hover:text-black p-0.5 cursor-pointer"
+                title="Dismiss"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-[12px] text-[#4A4740] leading-relaxed mb-2.5">
+              Firebase OAuth requires your current app domain to be added to Authorized Domains in the Firebase Console:
+            </p>
+
+            <div className="flex items-center gap-2 mb-3 bg-white p-2 rounded-xl border border-black/20">
+              <code className="text-[11px] font-mono font-semibold text-black truncate flex-1 select-all">
+                {unauthorizedDomain}
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  if (navigator.clipboard) {
+                    navigator.clipboard.writeText(unauthorizedDomain);
+                    setCopiedDomain(true);
+                    setTimeout(() => setCopiedDomain(false), 2500);
+                  }
+                }}
+                className="px-2.5 py-1 bg-[#FFC629] text-black text-[11px] font-bold rounded-lg border border-black flex items-center gap-1 hover:bg-[#FFB700] transition-colors cursor-pointer flex-shrink-0"
+              >
+                {copiedDomain ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-green-700" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-2">
+              <a
+                href="https://console.firebase.google.com/project/gigly-company-2/authentication/settings"
+                target="_blank"
+                rel="noreferrer"
+                className="py-1.5 px-3 bg-black text-white text-[11px] font-bold rounded-xl flex items-center justify-center gap-1.5 hover:bg-[#222] transition-colors text-center"
+              >
+                <span>Open Firebase Console</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <button
+                type="button"
+                onClick={() => setUnauthorizedDomain(null)}
+                className="py-1.5 px-3 bg-white text-black text-[11px] font-bold rounded-xl border border-black hover:bg-neutral-100 transition-colors text-center cursor-pointer"
+              >
+                Use Email / Demo
+              </button>
+            </div>
+            <p className="text-[10.5px] text-[#6E6E6E] font-medium leading-tight">
+              💡 <strong>Instant alternative:</strong> Email & Password or Demo Mode below works right away with no setup needed!
+            </p>
+          </div>
+        )}
+
         {error && (
           <div className="p-3 mb-4 rounded-xl bg-red-50 border-[1.5px] border-red-400 text-red-700 text-[12px] font-semibold">
             {error}
@@ -309,40 +486,134 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
             )}
           </button>
         </form>
-
-        {/* Quick Instant Demo Buttons */}
-        <div className="mt-5 pt-4 border-t border-dashed border-black/15">
-          <p className="text-[11px] font-bold text-center text-[#6E6E6E] uppercase tracking-wider mb-2.5">
-            ⚡ Quick Demo Preview
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleDemoLogin('freelancer')}
-              className="py-2 px-2.5 bg-[#FFF9E6] border-2 border-black rounded-xl text-[11px] font-bold text-black shadow-[2px_2px_0px_0px_#000] hover:bg-[#FFC629] transition-colors text-center"
-            >
-              Freelancer Mode
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDemoLogin('business')}
-              className="py-2 px-2.5 bg-[#FFF9E6] border-2 border-black rounded-xl text-[11px] font-bold text-black shadow-[2px_2px_0px_0px_#000] hover:bg-[#FFC629] transition-colors text-center"
-            >
-              Business Mode
-            </button>
-          </div>
-        </div>
       </div>
 
-      {/* Admin Footnote Link */}
-      <div className="text-center pt-3 pb-1">
+      {/* Discreet footer with hidden admin lock */}
+      <div className="text-center pt-3 pb-1 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-[#8E8E8E]">
+        <span>Gigly · Network</span>
+        <span>•</span>
         <button
-          onClick={onAdminClick}
-          className="text-[11px] font-semibold text-[#8E8E8E] underline hover:text-black"
+          type="button"
+          onClick={() => {
+            setShowAdminModal(true);
+            setAdminError(null);
+          }}
+          title="Admin Verification"
+          className="opacity-25 hover:opacity-100 transition-opacity p-0.5 cursor-pointer inline-flex items-center"
         >
-          Admin Dashboard
+          <Lock className="w-2.5 h-2.5 text-[#6E6E6E]" />
         </button>
       </div>
+
+      {/* Protected Admin Access Modal */}
+      {showAdminModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="w-full max-w-[360px] bg-white border-[3px] border-black rounded-[24px] p-6 shadow-[6px_8px_0px_0px_#000] relative"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setShowAdminModal(false);
+                setAdminError(null);
+                setAdminPassword('');
+              }}
+              className="absolute top-4 right-4 w-7 h-7 rounded-full border border-black flex items-center justify-center bg-[#FFFCF5] hover:bg-[#FFC629] transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4 text-black" />
+            </button>
+
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-8 h-8 rounded-full bg-[#FFC629] border-2 border-black flex items-center justify-center shadow-[1.5px_1.5px_0px_0px_#000]">
+                <Lock className="w-4 h-4 text-black" />
+              </div>
+              <div>
+                <h3 className="font-display font-[800] text-[17px] text-black">
+                  Admin Verification
+                </h3>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#6E6E6E]">
+                  Restricted Access
+                </span>
+              </div>
+            </div>
+
+            <p className="text-[12px] font-medium text-[#4A4A4A] mb-4">
+              Enter your administrator email and password to access the platform dashboard.
+            </p>
+
+            {adminError && (
+              <div className="mb-3 p-2.5 rounded-xl bg-red-50 border-[1.5px] border-red-400 text-red-700 text-[11.5px] font-semibold">
+                {adminError}
+              </div>
+            )}
+
+            <form onSubmit={handleAdminAuth} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-[#6E6E6E] mb-1">
+                  Admin Email
+                </label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    required
+                    value={adminEmail}
+                    onChange={(e) => setAdminEmail(e.target.value)}
+                    placeholder="giglycompany@gmail.com"
+                    className="w-full px-3 py-2 bg-[#FFFCF5] border-[2px] border-black rounded-xl text-[13px] font-semibold focus:outline-none focus:ring-2 focus:ring-[#FFC629]"
+                  />
+                  <Mail className="w-3.5 h-3.5 text-[#6E6E6E] absolute right-3 top-3" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-[#6E6E6E] mb-1">
+                  Admin Password
+                </label>
+                <div className="relative">
+                  <input
+                    type="password"
+                    required
+                    autoFocus
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full px-3 py-2 bg-[#FFFCF5] border-[2px] border-black rounded-xl text-[13px] font-semibold focus:outline-none focus:ring-2 focus:ring-[#FFC629]"
+                  />
+                  <Lock className="w-3.5 h-3.5 text-[#6E6E6E] absolute right-3 top-3" />
+                </div>
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAdminModal(false);
+                    setAdminError(null);
+                    setAdminPassword('');
+                  }}
+                  className="flex-1 py-2.5 bg-white text-black font-display font-bold text-[12.5px] rounded-full border-2 border-black cursor-pointer shadow-[2px_2px_0px_0px_#000]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={adminLoading}
+                  className="flex-1 py-2.5 bg-[#FFC629] text-black font-display font-bold text-[12.5px] rounded-full border-2 border-black cursor-pointer shadow-[2px_2px_0px_0px_#000] flex items-center justify-center gap-1.5 disabled:opacity-60"
+                >
+                  {adminLoading ? (
+                    <span className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <span>Unlock Dashboard</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
     </motion.div>
   );
 }
