@@ -231,34 +231,174 @@ export async function seedInitialFirestoreData() {
 }
 
 /**
- * Real-time listener for gigs or talent profiles from Firestore
- * Strictly returns authentic profiles from the database
+ * Convert a real UserProfile into a GigItem for the swipe deck
+ */
+export function convertProfileToGigItem(user: UserProfile, uid?: string): GigItem {
+  const isFreelancer = user.role === 'freelancer';
+  return {
+    id: user.userId || uid || `user-${user.email}`,
+    rate: user.rateOrBudget || (isFreelancer ? '$60 / hr' : '$1,500 project'),
+    unit: user.rateOrBudget?.includes('/hr') || !isFreelancer ? '' : '',
+    title: user.roleTitle || (isFreelancer ? 'Freelancer' : 'Hiring Project'),
+    client: user.name || 'Member',
+    category: (user.category as any) || 'Others',
+    tags: Array.isArray(user.skills) && user.skills.length > 0 ? user.skills : [user.category || 'Specialist'],
+    desc: user.bio || (isFreelancer ? 'Looking for exciting gigs and client partnerships.' : 'Looking for talented freelancers to collaborate with.'),
+    posted: 'Active account',
+    proposals: isFreelancer ? 'Available now' : 'Hiring now',
+    hot: Boolean(user.verified),
+    avatarBg: '#FFC629',
+    type: isFreelancer ? 'candidate' : 'job',
+  };
+}
+
+/**
+ * Real-time listener for authentic people who have made an account from Firestore & local storage
+ * - If current user is a freelancer: shows real businesses who made an account & are hiring
+ * - If current user is a business: shows real freelancers who made an account & are looking for gigs
  */
 export function subscribeToGigs(
   role: 'freelancer' | 'business',
-  onUpdate: (items: GigItem[]) => void
-) {
-  const targetType = role === 'freelancer' ? 'job' : 'candidate';
-  const pathForQuery = 'gigs';
+  arg2: any,
+  arg3?: any,
+  arg4?: any
+): () => void {
+  let onUpdate: (items: GigItem[]) => void;
+  let currentUserId: string | undefined;
+  let currentUserEmail: string | undefined;
 
+  if (typeof arg2 === 'function') {
+    onUpdate = arg2;
+    currentUserId = arg3;
+    currentUserEmail = arg4;
+  } else {
+    currentUserId = arg2;
+    currentUserEmail = arg3;
+    onUpdate = arg4;
+  }
+
+  const targetRole = role === 'freelancer' ? 'business' : 'freelancer';
+  const targetGigType = role === 'freelancer' ? 'job' : 'candidate';
+
+  let usersList: GigItem[] = [];
+  let gigsList: GigItem[] = [];
+  let localList: GigItem[] = [];
+
+  const emitCombined = () => {
+    const map = new Map<string, GigItem>();
+
+    // Helper to check if item belongs to current user
+    const isSelf = (item: GigItem, email?: string) => {
+      if (currentUserId && (item.id === currentUserId || item.id === `gig-user-${currentUserId}`)) {
+        return true;
+      }
+      if (currentUserEmail && email && email.toLowerCase() === currentUserEmail.toLowerCase()) {
+        return true;
+      }
+      return false;
+    };
+
+    // 1. Add real users who registered as target role
+    usersList.forEach((item) => {
+      if (!isSelf(item)) {
+        map.set(item.id, item);
+      }
+    });
+
+    // 2. Add gigs created for this target role
+    gigsList.forEach((item) => {
+      if (!isSelf(item) && !map.has(item.id)) {
+        map.set(item.id, item);
+      }
+    });
+
+    // 3. Add local real profiles from other accounts (useful for preview/testing)
+    localList.forEach((item) => {
+      if (!isSelf(item) && !map.has(item.id)) {
+        map.set(item.id, item);
+      }
+    });
+
+    const combined = Array.from(map.values());
+    onUpdate(combined);
+  };
+
+  // 1. Load real profiles from localStorage
   try {
-    const q = query(collection(db, pathForQuery), where('type', '==', targetType));
+    const foundLocal: GigItem[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('gigly_profile_')) {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (
+            p &&
+            p.role === targetRole &&
+            p.name &&
+            p.userId !== currentUserId &&
+            p.email?.toLowerCase() !== currentUserEmail?.toLowerCase()
+          ) {
+            foundLocal.push(convertProfileToGigItem(p, p.userId));
+          }
+        }
+      }
+    }
+    localList = foundLocal;
+    emitCombined();
+  } catch {}
 
-    const unsubscribe = onSnapshot(
-      q,
+  // 2. Subscribe to real users collection in Firestore
+  let unsubUsers = () => {};
+  try {
+    const qUsers = query(collection(db, 'users'), where('role', '==', targetRole));
+    unsubUsers = onSnapshot(
+      qUsers,
       (snapshot) => {
-        if (!snapshot.empty) {
-          const loaded: GigItem[] = [];
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
-            // Filter out any lingering mock IDs
-            if (docSnap.id.startsWith('job-') || docSnap.id.startsWith('cand-')) {
-              return;
-            }
-            loaded.push({
+        const list: GigItem[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as UserProfile;
+          if (
+            data &&
+            (data.name || data.profileCompleted) &&
+            docSnap.id !== currentUserId &&
+            data.userId !== currentUserId &&
+            data.email?.toLowerCase() !== currentUserEmail?.toLowerCase()
+          ) {
+            list.push(convertProfileToGigItem(data, docSnap.id));
+          }
+        });
+        usersList = list;
+        emitCombined();
+      },
+      () => {
+        // Fallback gracefully without throwing
+      }
+    );
+  } catch {}
+
+  // 3. Subscribe to gigs collection in Firestore
+  let unsubGigs = () => {};
+  try {
+    const qGigs = query(collection(db, 'gigs'), where('type', '==', targetGigType));
+    unsubGigs = onSnapshot(
+      qGigs,
+      (snapshot) => {
+        const list: GigItem[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          // Filter out legacy mock IDs
+          if (docSnap.id.startsWith('job-') || docSnap.id.startsWith('cand-')) {
+            return;
+          }
+          if (
+            data.userId !== currentUserId &&
+            docSnap.id !== `gig-user-${currentUserId}`
+          ) {
+            list.push({
               id: docSnap.id,
               rate: data.rate || '$50',
-              unit: data.unit || '/hr',
+              unit: data.unit || '',
               title: data.title || '',
               client: data.client || '',
               category: data.category || 'Others',
@@ -267,25 +407,24 @@ export function subscribeToGigs(
               posted: data.posted || 'recently',
               proposals: data.proposals || 'open',
               hot: Boolean(data.hot),
+              avatarBg: data.avatarBg || '#FFC629',
+              type: targetGigType,
             });
-          });
-          onUpdate(loaded);
-        } else {
-          onUpdate([]);
-        }
+          }
+        });
+        gigsList = list;
+        emitCombined();
       },
-      (error) => {
-        handleFirestoreError(error, OperationType.GET, pathForQuery);
-        onUpdate([]);
+      () => {
+        // Fallback gracefully without throwing
       }
     );
+  } catch {}
 
-    return unsubscribe;
-  } catch (e) {
-    handleFirestoreError(e, OperationType.GET, pathForQuery);
-    onUpdate([]);
-    return () => {};
-  }
+  return () => {
+    unsubUsers();
+    unsubGigs();
+  };
 }
 
 /**
@@ -419,9 +558,32 @@ export async function saveUserProfileToFirestore(userId: string, profile: UserPr
       },
       { merge: true }
     );
+
+    // Also sync as a real gig/talent card for the swiping page
+    const gigDocRef = doc(db, 'gigs', `gig-user-${userId}`);
+    const gigData: any = {
+      id: `gig-user-${userId}`,
+      userId,
+      isRealUser: true,
+      type: profile.role === 'freelancer' ? 'candidate' : 'job',
+      rate: profile.rateOrBudget || (profile.role === 'freelancer' ? '$60 / hr' : '$1,500 project'),
+      unit: '',
+      title: profile.roleTitle || (profile.role === 'freelancer' ? 'Freelancer' : 'Hiring Project'),
+      client: profile.name || 'Member',
+      category: profile.category || 'Others',
+      tags: Array.isArray(profile.skills) && profile.skills.length > 0 ? profile.skills : [profile.category || 'Specialist'],
+      desc: profile.bio || '',
+      posted: 'Active account',
+      proposals: profile.role === 'freelancer' ? 'Available now' : 'Hiring now',
+      hot: Boolean(profile.verified),
+      avatarBg: '#FFC629',
+      updatedAt: serverTimestamp(),
+    };
+    const gigPromise = setDoc(gigDocRef, gigData, { merge: true }).catch(() => {});
+
     // Timeout of 1200ms ensures UI callers are never hung up by Firestore connection state
     const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
-    await Promise.race([writePromise, timeoutPromise]);
+    await Promise.race([Promise.all([writePromise, gigPromise]), timeoutPromise]);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, userPath);
   }

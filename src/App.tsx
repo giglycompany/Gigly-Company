@@ -151,18 +151,23 @@ export default function App() {
     return () => unsubMatches();
   }, [currentUserId]);
 
-  // Subscribe to real-time gigs / talent from Firestore
+  // Subscribe to real-time people who made an account from Firestore
   useEffect(() => {
-    const unsubGigs = subscribeToGigs(userRole, (items) => {
-      if (userRole === 'freelancer') {
-        setJobs(items);
-      } else {
-        setCandidates(items);
-      }
-    });
+    const unsubGigs = subscribeToGigs(
+      userRole,
+      (items) => {
+        if (userRole === 'freelancer') {
+          setJobs(items);
+        } else {
+          setCandidates(items);
+        }
+      },
+      currentUserId,
+      profile.email
+    );
 
     return () => unsubGigs();
-  }, [userRole]);
+  }, [userRole, currentUserId, profile.email]);
 
   // Handle Authentication Success
   const handleAuthSuccess = async (role?: 'freelancer' | 'business') => {
