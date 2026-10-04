@@ -1,12 +1,12 @@
 {
-  "projectId": "gigly-company-2",
-  "appId": "1:856992127792:web:d78b5a12194a6d765486f5",
-  "apiKey": "AIzaSyB34MeC9F4noOsW0sxHRKhWuE6L3F1fmXw",
-  "authDomain": "gigly-company-2.firebaseapp.com",
-  "firestoreDatabaseId": "(default)",
-  "storageBucket": "gigly-company-2.firebasestorage.app",
-  "messagingSenderId": "856992127792",
-  "measurementId": "G-V1TCDM5LZV",
-  "oAuthClientId": "",
+  "projectId": "gen-lang-client-0672159944",
+  "appId": "1:1071280460851:web:3e141e946b0e4765823f46",
+  "apiKey": "AIzaSyD4ykg_OKbluwO72aniv4cVq64wMbd2LnM",
+  "authDomain": "gen-lang-client-0672159944.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-gigly-d99c8809-f033-4323-bc9a-47b69cae3df9",
+  "storageBucket": "gen-lang-client-0672159944.firebasestorage.app",
+  "messagingSenderId": "1071280460851",
+  "measurementId": "",
+  "oAuthClientId": "1071280460851-epd6efah4njac28cig9one7nj68inbum.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

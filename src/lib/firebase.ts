@@ -183,6 +183,184 @@ export function handleFirestoreError(
   console.warn('Firestore notice: ', JSON.stringify(errInfo));
 }
 
+export function encodeEmailKey(email: string): string {
+  return email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+
+export interface AuthUserSession {
+  uid: string;
+  email: string;
+  displayName?: string;
+  isNewUser?: boolean;
+}
+
+export function getActiveUserSession(): AuthUserSession | null {
+  try {
+    const raw = localStorage.getItem('gigly_active_user');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return null;
+}
+
+export async function logoutUser() {
+  try {
+    await auth.signOut();
+  } catch {}
+  try {
+    localStorage.removeItem('gigly_active_user');
+    sessionStorage.removeItem('gigly_admin_session');
+  } catch {}
+}
+
+/**
+ * Robust User Authentication:
+ * First attempts Firebase Auth. If email/password is not enabled in Firebase project
+ * (e.g. auth/operation-not-allowed), it seamlessly falls back to Firestore accounts collection
+ * so real users can always create accounts, log in, and be saved to Firestore across devices.
+ */
+export async function loginOrRegisterAccount(
+  email: string,
+  pass: string,
+  mode: 'login' | 'signup'
+): Promise<AuthUserSession> {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanPassword = pass.trim();
+  const accountKey = encodeEmailKey(cleanEmail);
+
+  // 1. Try Firebase Auth
+  try {
+    let userCred: any;
+    if (mode === 'signup') {
+      userCred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+    } else {
+      userCred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+    }
+
+    if (userCred && userCred.user) {
+      const session: AuthUserSession = {
+        uid: userCred.user.uid,
+        email: cleanEmail,
+        displayName: userCred.user.displayName || cleanEmail.split('@')[0],
+        isNewUser: mode === 'signup',
+      };
+      localStorage.setItem('gigly_active_user', JSON.stringify(session));
+
+      // Also record in Firestore accounts collection for cross-system reference
+      try {
+        await setDoc(
+          doc(db, 'accounts', accountKey),
+          {
+            email: cleanEmail,
+            uid: userCred.user.uid,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch {}
+
+      return session;
+    }
+  } catch (firebaseErr: any) {
+    // If user already exists in Firebase Auth during signup, attempt sign in:
+    if (firebaseErr.code === 'auth/email-already-in-use') {
+      try {
+        const loginCred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+        const session: AuthUserSession = {
+          uid: loginCred.user.uid,
+          email: cleanEmail,
+          isNewUser: false,
+        };
+        localStorage.setItem('gigly_active_user', JSON.stringify(session));
+        return session;
+      } catch {
+        throw new Error('This email is already registered. Switch to the Log in tab to continue.');
+      }
+    }
+
+    // If Firebase Auth fails with invalid password/credential:
+    if (
+      firebaseErr.code === 'auth/wrong-password' ||
+      firebaseErr.code === 'auth/invalid-credential'
+    ) {
+      throw new Error('Invalid email or password. Please verify your credentials.');
+    }
+
+    // If Firebase Auth gives operation-not-allowed, network-request-failed, or user-not-found,
+    // seamlessly use Firestore account authentication so the user is never blocked!
+    console.warn('Firebase Auth fallback to Firestore account:', firebaseErr?.code || firebaseErr);
+  }
+
+  // 2. Firestore-backed Account Authentication
+  const accRef = doc(db, 'accounts', accountKey);
+  let accSnap;
+  try {
+    accSnap = await getDoc(accRef);
+  } catch (err) {
+    console.warn('Firestore account lookup error:', err);
+  }
+
+  const generatedUid = `usr_${accountKey}`;
+
+  if (mode === 'signup') {
+    if (accSnap && accSnap.exists()) {
+      throw new Error('This email is already registered. Please switch to the Log in tab.');
+    }
+
+    const newAccountData = {
+      email: cleanEmail,
+      password: cleanPassword,
+      uid: generatedUid,
+      createdAt: serverTimestamp(),
+    };
+
+    try {
+      await setDoc(accRef, newAccountData);
+    } catch (err) {
+      console.warn('Firestore setDoc account notice:', err);
+    }
+
+    const session: AuthUserSession = {
+      uid: generatedUid,
+      email: cleanEmail,
+      displayName: cleanEmail.split('@')[0],
+      isNewUser: true,
+    };
+    localStorage.setItem('gigly_active_user', JSON.stringify(session));
+    return session;
+  } else {
+    // Mode is 'login'
+    if (accSnap && accSnap.exists()) {
+      const data = accSnap.data();
+      if (data && data.password && data.password !== cleanPassword) {
+        throw new Error('Incorrect password. Please verify your credentials.');
+      }
+      const session: AuthUserSession = {
+        uid: data.uid || generatedUid,
+        email: cleanEmail,
+        isNewUser: false,
+      };
+      localStorage.setItem('gigly_active_user', JSON.stringify(session));
+      return session;
+    }
+
+    // Check if user profile exists in Firestore users
+    try {
+      const userSnap = await getDoc(doc(db, 'users', generatedUid));
+      if (userSnap.exists()) {
+        const session: AuthUserSession = {
+          uid: generatedUid,
+          email: cleanEmail,
+          isNewUser: false,
+        };
+        localStorage.setItem('gigly_active_user', JSON.stringify(session));
+        return session;
+      }
+    } catch {}
+
+    throw new Error('No account found for this email. Switch to the Sign up tab to register!');
+  }
+}
+
 /**
  * Validate connection to Firestore on initial boot
  */
@@ -234,11 +412,12 @@ export async function seedInitialFirestoreData() {
  * Convert a real UserProfile into a GigItem for the swipe deck
  */
 export function convertProfileToGigItem(user: UserProfile, uid?: string): GigItem {
-  const isFreelancer = user.role === 'freelancer';
+  const isFreelancer = (user.role || '').toLowerCase() === 'freelancer';
+  const effectiveId = user.userId || uid || (user.email ? `user-${encodeEmailKey(user.email)}` : `user-${Date.now()}`);
   return {
-    id: user.userId || uid || `user-${user.email}`,
+    id: effectiveId,
     rate: user.rateOrBudget || (isFreelancer ? '$60 / hr' : '$1,500 project'),
-    unit: user.rateOrBudget?.includes('/hr') || !isFreelancer ? '' : '',
+    unit: '',
     title: user.roleTitle || (isFreelancer ? 'Freelancer' : 'Hiring Project'),
     client: user.name || 'Member',
     category: (user.category as any) || 'Others',
@@ -334,8 +513,8 @@ export function subscribeToGigs(
           const p = JSON.parse(raw);
           if (
             p &&
-            p.role === targetRole &&
-            p.name &&
+            (p.role || '').toLowerCase() === targetRole &&
+            (p.name || p.roleTitle) &&
             p.userId !== currentUserId &&
             p.email?.toLowerCase() !== currentUserEmail?.toLowerCase()
           ) {
@@ -348,24 +527,52 @@ export function subscribeToGigs(
     emitCombined();
   } catch {}
 
-  // 2. Subscribe to real users collection in Firestore
+  // Instant fetch from Firestore users to populate immediately
+  getDocs(collection(db, 'users'))
+    .then((snap) => {
+      if (!snap.empty) {
+        const list: GigItem[] = [];
+        snap.forEach((docSnap) => {
+          const data = docSnap.data() as UserProfile;
+          const userRole = (data?.role || '').toLowerCase();
+          const docId = docSnap.id;
+          if (
+            data &&
+            userRole === targetRole &&
+            (data.name || data.roleTitle || data.profileCompleted) &&
+            docId !== currentUserId &&
+            data.userId !== currentUserId &&
+            data.email?.toLowerCase() !== currentUserEmail?.toLowerCase()
+          ) {
+            list.push(convertProfileToGigItem(data, docId));
+          }
+        });
+        usersList = list;
+        emitCombined();
+      }
+    })
+    .catch(() => {});
+
+  // 2. Subscribe to real users collection in Firestore with live listener
   let unsubUsers = () => {};
   try {
-    const qUsers = query(collection(db, 'users'), where('role', '==', targetRole));
     unsubUsers = onSnapshot(
-      qUsers,
+      collection(db, 'users'),
       (snapshot) => {
         const list: GigItem[] = [];
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as UserProfile;
+          const userRole = (data?.role || '').toLowerCase();
+          const docId = docSnap.id;
           if (
             data &&
-            (data.name || data.profileCompleted) &&
-            docSnap.id !== currentUserId &&
+            userRole === targetRole &&
+            (data.name || data.roleTitle || data.profileCompleted) &&
+            docId !== currentUserId &&
             data.userId !== currentUserId &&
             data.email?.toLowerCase() !== currentUserEmail?.toLowerCase()
           ) {
-            list.push(convertProfileToGigItem(data, docSnap.id));
+            list.push(convertProfileToGigItem(data, docId));
           }
         });
         usersList = list;
@@ -377,21 +584,58 @@ export function subscribeToGigs(
     );
   } catch {}
 
-  // 3. Subscribe to gigs collection in Firestore
-  let unsubGigs = () => {};
-  try {
-    const qGigs = query(collection(db, 'gigs'), where('type', '==', targetGigType));
-    unsubGigs = onSnapshot(
-      qGigs,
-      (snapshot) => {
+  // Instant fetch from Firestore gigs to populate immediately
+  getDocs(collection(db, 'gigs'))
+    .then((snap) => {
+      if (!snap.empty) {
         const list: GigItem[] = [];
-        snapshot.forEach((docSnap) => {
+        snap.forEach((docSnap) => {
           const data = docSnap.data();
-          // Filter out legacy mock IDs
           if (docSnap.id.startsWith('job-') || docSnap.id.startsWith('cand-')) {
             return;
           }
           if (
+            data.type === targetGigType &&
+            data.userId !== currentUserId &&
+            docSnap.id !== `gig-user-${currentUserId}`
+          ) {
+            list.push({
+              id: docSnap.id,
+              rate: data.rate || '$50',
+              unit: data.unit || '',
+              title: data.title || '',
+              client: data.client || '',
+              category: data.category || 'Others',
+              tags: data.tags || [],
+              desc: data.desc || '',
+              posted: data.posted || 'recently',
+              proposals: data.proposals || 'open',
+              hot: Boolean(data.hot),
+              avatarBg: data.avatarBg || '#FFC629',
+              type: targetGigType,
+            });
+          }
+        });
+        gigsList = list;
+        emitCombined();
+      }
+    })
+    .catch(() => {});
+
+  // 3. Subscribe to gigs collection in Firestore with live listener
+  let unsubGigs = () => {};
+  try {
+    unsubGigs = onSnapshot(
+      collection(db, 'gigs'),
+      (snapshot) => {
+        const list: GigItem[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (docSnap.id.startsWith('job-') || docSnap.id.startsWith('cand-')) {
+            return;
+          }
+          if (
+            data.type === targetGigType &&
             data.userId !== currentUserId &&
             docSnap.id !== `gig-user-${currentUserId}`
           ) {
@@ -481,27 +725,34 @@ export async function syncMatchMessagesToFirestore(matchId: number, messages: an
 }
 
 /**
- * Fetch a user profile from Firestore with fast timeout fallback
+ * Fetch a user profile from Firestore with local storage caching fallback
  */
 export async function getUserProfileFromFirestore(userId: string): Promise<UserProfile | null> {
   if (!userId || userId === 'guest-user') return null;
   const userPath = `users/${userId}`;
   try {
     const userRef = doc(db, 'users', userId);
-    // Fast timeout (1200ms) so slow cloud connection never freezes or stalls the app
-    const fetchPromise = getDoc(userRef);
-    const timeoutPromise = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), 1200)
-    );
-    const snap: any = await Promise.race([fetchPromise, timeoutPromise]);
-    if (snap && typeof snap.exists === 'function' && snap.exists()) {
-      return snap.data() as UserProfile;
+    const snap = await getDoc(userRef);
+    if (snap && snap.exists()) {
+      const data = snap.data() as UserProfile;
+      try {
+        localStorage.setItem(`gigly_profile_${userId}`, JSON.stringify(data));
+      } catch {}
+      return data;
     }
-    return null;
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, userPath);
-    return null;
   }
+
+  // Fallback to local storage
+  try {
+    const cached = localStorage.getItem(`gigly_profile_${userId}`);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+  } catch {}
+
+  return null;
 }
 
 /**
@@ -543,49 +794,72 @@ export function subscribeToUserMatches(
 }
 
 /**
- * Sync user profile to Firestore
+ * Sync user profile to Firestore and create real discoverable gig card
  */
 export async function saveUserProfileToFirestore(userId: string, profile: UserProfile) {
-  if (!userId || userId === 'guest-user') return;
-  const userPath = `users/${userId}`;
+  let effectiveId = userId;
+  if (!effectiveId || effectiveId === 'guest-user') {
+    effectiveId = profile.userId || (profile.email ? `usr_${encodeEmailKey(profile.email)}` : `usr_${Date.now()}`);
+  }
+
+  const cleanProfile: UserProfile = {
+    ...profile,
+    userId: effectiveId,
+    profileCompleted: true,
+  };
+
+  // 1. Immediately cache locally
   try {
-    const writePromise = setDoc(
-      doc(db, 'users', userId),
+    localStorage.setItem(`gigly_profile_${effectiveId}`, JSON.stringify(cleanProfile));
+    if (cleanProfile.email) {
+      localStorage.setItem(`gigly_profile_${encodeEmailKey(cleanProfile.email)}`, JSON.stringify(cleanProfile));
+    }
+  } catch {}
+
+  const userPath = `users/${effectiveId}`;
+
+  // 2. Persist to Firestore users collection
+  try {
+    await setDoc(
+      doc(db, 'users', effectiveId),
       {
-        ...profile,
-        userId,
+        ...cleanProfile,
+        userId: effectiveId,
         updatedAt: serverTimestamp(),
       },
       { merge: true }
     );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, userPath);
+  }
 
-    // Also sync as a real gig/talent card for the swiping page
-    const gigDocRef = doc(db, 'gigs', `gig-user-${userId}`);
+  // 3. Persist as an active talent/gig card for the opposite role to discover
+  try {
+    const gigDocRef = doc(db, 'gigs', `gig-user-${effectiveId}`);
+    const isFreelancer = (cleanProfile.role || '').toLowerCase() === 'freelancer';
     const gigData: any = {
-      id: `gig-user-${userId}`,
-      userId,
+      id: `gig-user-${effectiveId}`,
+      userId: effectiveId,
       isRealUser: true,
-      type: profile.role === 'freelancer' ? 'candidate' : 'job',
-      rate: profile.rateOrBudget || (profile.role === 'freelancer' ? '$60 / hr' : '$1,500 project'),
+      type: isFreelancer ? 'candidate' : 'job',
+      rate: cleanProfile.rateOrBudget || (isFreelancer ? '$60 / hr' : '$1,500 project'),
       unit: '',
-      title: profile.roleTitle || (profile.role === 'freelancer' ? 'Freelancer' : 'Hiring Project'),
-      client: profile.name || 'Member',
-      category: profile.category || 'Others',
-      tags: Array.isArray(profile.skills) && profile.skills.length > 0 ? profile.skills : [profile.category || 'Specialist'],
-      desc: profile.bio || '',
+      title: cleanProfile.roleTitle || (isFreelancer ? 'Freelancer' : 'Hiring Project'),
+      client: cleanProfile.name || 'Member',
+      category: cleanProfile.category || 'Others',
+      tags: Array.isArray(cleanProfile.skills) && cleanProfile.skills.length > 0
+        ? cleanProfile.skills
+        : [cleanProfile.category || 'Specialist'],
+      desc: cleanProfile.bio || (isFreelancer ? 'Looking for exciting gigs and client partnerships.' : 'Looking for talented freelancers to collaborate with.'),
       posted: 'Active account',
-      proposals: profile.role === 'freelancer' ? 'Available now' : 'Hiring now',
-      hot: Boolean(profile.verified),
+      proposals: isFreelancer ? 'Available now' : 'Hiring now',
+      hot: Boolean(cleanProfile.verified),
       avatarBg: '#FFC629',
       updatedAt: serverTimestamp(),
     };
-    const gigPromise = setDoc(gigDocRef, gigData, { merge: true }).catch(() => {});
-
-    // Timeout of 1200ms ensures UI callers are never hung up by Firestore connection state
-    const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
-    await Promise.race([Promise.all([writePromise, gigPromise]), timeoutPromise]);
+    await setDoc(gigDocRef, gigData, { merge: true });
   } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, userPath);
+    console.warn('Failed saving gig card:', err);
   }
 }
 

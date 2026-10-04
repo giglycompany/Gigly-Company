@@ -345,34 +345,69 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
             <div className="w-16 h-16 rounded-full bg-[#FFF9E6] border-2 border-black flex items-center justify-center mb-3">
               <Sparkles className="w-8 h-8 text-[#FFC629] fill-[#FFC629]" />
             </div>
-            <h3 className="font-display font-[800] text-[19px] text-black mb-1">
-              {selectedCategory !== 'All'
-                ? `No more "${selectedCategory}" cards!`
-                : "You're all caught up!"}
-            </h3>
-            <p className="text-[12.5px] font-medium text-[#6E6E6E] max-w-[250px] mb-5">
-              {selectedCategory !== 'All'
-                ? `Switch to another filter category or reshuffle the entire ${role === 'freelancer' ? 'gigs' : 'talent'} deck.`
-                : `Check back later for new ${role === 'freelancer' ? 'gigs' : 'freelancers'}, or reshuffle the deck.`}
-            </p>
-            <div className="flex flex-col gap-2 w-full max-w-[200px]">
-              {selectedCategory !== 'All' && (
+
+            {items.length === 0 ? (
+              <>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#EBF7EE] border border-[#0D6832] text-[11px] font-bold text-[#0D6832] mb-2">
+                  <span className="w-2 h-2 rounded-full bg-[#0D6832] animate-pulse" />
+                  <span>Live Sync Connected</span>
+                </div>
+                <h3 className="font-display font-[800] text-[18px] text-black mb-1">
+                  {role === 'freelancer'
+                    ? 'Waiting for businesses to join'
+                    : 'Waiting for freelancers to join'}
+                </h3>
+                <p className="text-[12px] font-medium text-[#6E6E6E] max-w-[280px] mb-5 leading-relaxed">
+                  Only authentic accounts who registered as a{' '}
+                  <strong className="text-black">
+                    {role === 'freelancer' ? 'business' : 'freelancer'}
+                  </strong>{' '}
+                  appear here. When someone creates an account, they appear here live!
+                </p>
                 <button
-                  onClick={() => setSelectedCategory('All')}
-                  className="py-2.5 px-4 bg-white text-black font-display font-[800] text-[12px] rounded-full border-[2px] border-black flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_0px_#000] hover:bg-[#F5F5F5] active:translate-y-[1px]"
+                  onClick={onReshuffle}
+                  className="py-2.5 px-5 bg-[#FFC629] text-black font-display font-[800] text-[12px] rounded-full border-[2px] border-black flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_0px_#000] hover:translate-y-[-1px] active:translate-y-[1px]"
                 >
-                  <Filter className="w-3.5 h-3.5" />
-                  <span>View All Categories</span>
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Check for New People</span>
                 </button>
-              )}
-              <button
-                onClick={handleResetDeck}
-                className="py-2.5 px-4 bg-[#FFC629] text-black font-display font-[800] text-[12px] rounded-full border-[2px] border-black flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_0px_#000] hover:translate-y-[-1px] active:translate-y-[1px]"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reshuffle Deck</span>
-              </button>
-            </div>
+              </>
+            ) : (
+              <>
+                <h3 className="font-display font-[800] text-[19px] text-black mb-1">
+                  {selectedCategory !== 'All'
+                    ? `No more "${selectedCategory}" cards!`
+                    : "You're all caught up!"}
+                </h3>
+                <p className="text-[12.5px] font-medium text-[#6E6E6E] max-w-[250px] mb-5">
+                  {selectedCategory !== 'All'
+                    ? `Switch to another category or reshuffle the entire ${
+                        role === 'freelancer' ? 'gigs' : 'talent'
+                      } deck.`
+                    : `You have reviewed all current ${
+                        role === 'freelancer' ? 'businesses' : 'freelancers'
+                      }. Reshuffle to browse them again.`}
+                </p>
+                <div className="flex flex-col gap-2 w-full max-w-[200px]">
+                  {selectedCategory !== 'All' && (
+                    <button
+                      onClick={() => setSelectedCategory('All')}
+                      className="py-2.5 px-4 bg-white text-black font-display font-[800] text-[12px] rounded-full border-[2px] border-black flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_0px_#000] hover:bg-[#F5F5F5] active:translate-y-[1px]"
+                    >
+                      <Filter className="w-3.5 h-3.5" />
+                      <span>View All Categories</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={handleResetDeck}
+                    className="py-2.5 px-4 bg-[#FFC629] text-black font-display font-[800] text-[12px] rounded-full border-[2px] border-black flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_0px_#000] hover:translate-y-[-1px] active:translate-y-[1px]"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reshuffle Deck</span>
+                  </button>
+                </div>
+              </>
+            )}
           </motion.div>
         ) : (
           visibleCards.map((job, index) => {

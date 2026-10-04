@@ -1,16 +1,12 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, Sparkles, KeyRound, Mail, Lock, Copy, Check, ExternalLink, AlertTriangle, X } from 'lucide-react';
-import { auth, signInWithGoogle } from '../lib/firebase';
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
-} from 'firebase/auth';
+import { auth, signInWithGoogle, loginOrRegisterAccount, AuthUserSession } from '../lib/firebase';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import { GiglyLogo } from './GiglyLogo';
 
 interface AuthScreenProps {
-  onSuccess: (role?: 'freelancer' | 'business') => Promise<void> | void;
+  onSuccess: (session?: AuthUserSession) => Promise<void> | void;
   onAdminClick: () => void;
   onBackToStartup: () => void;
 }
@@ -56,11 +52,7 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
 
     setLoading(true);
     try {
-      if (tab === 'signup') {
-        await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
-      } else {
-        await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
-      }
+      const session = await loginOrRegisterAccount(cleanEmail, cleanPassword, tab);
 
       // If logging in as the administrator email, direct to admin dashboard
       if (cleanEmail === 'giglycompany@gmail.com') {
@@ -69,37 +61,18 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
         return;
       }
 
-      await onSuccess();
+      await onSuccess(session);
     } catch (err: any) {
-      console.warn('Firebase Auth notice:', err);
+      console.warn('Auth notice:', err);
 
-      // If Firebase failed due to domain authorization or password check, but admin master password matches:
+      // If logging in with admin master password:
       if (cleanEmail === 'giglycompany@gmail.com' && (MASTER_PASSWORDS.includes(cleanPassword) || savedPass === cleanPassword)) {
         sessionStorage.setItem('gigly_admin_session', 'true');
         onAdminClick();
         return;
       }
 
-      // If user already exists on signup, try logging in or show friendly message
-      if (err.code === 'auth/email-already-in-use') {
-        try {
-          await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
-          if (cleanEmail === 'giglycompany@gmail.com') {
-            sessionStorage.setItem('gigly_admin_session', 'true');
-            onAdminClick();
-            return;
-          }
-          await onSuccess();
-          return;
-        } catch {
-          setError('Email already exists. Switch to Log in tab to continue.');
-        }
-      } else if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-        setError('Invalid credentials. Please check your email and password.');
-      } else {
-        // Fallback for prototype preview
-        setError(err.message || 'Authentication error.');
-      }
+      setError(err?.message || 'Authentication error.');
     } finally {
       setLoading(false);
     }
@@ -112,12 +85,22 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
     try {
       const result = await signInWithGoogle();
       if (result && result.user) {
-        if (result.user.email?.toLowerCase() === 'giglycompany@gmail.com') {
+        const cleanEmail = result.user.email?.toLowerCase() || '';
+        if (cleanEmail === 'giglycompany@gmail.com') {
           sessionStorage.setItem('gigly_admin_session', 'true');
           onAdminClick();
           return;
         }
-        await onSuccess();
+
+        const session: AuthUserSession = {
+          uid: result.user.uid,
+          email: cleanEmail,
+          displayName: result.user.displayName || cleanEmail.split('@')[0],
+          isNewUser: false,
+        };
+        localStorage.setItem('gigly_active_user', JSON.stringify(session));
+
+        await onSuccess(session);
       }
     } catch (err: any) {
       console.warn('Firebase Google sign-in notice:', err?.code || err);
