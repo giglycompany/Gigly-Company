@@ -18,14 +18,13 @@ import {
 import {
   FREELANCER_SUGGESTIONS,
   BUSINESS_SUGGESTIONS,
-  CLIENT_REPLIES,
-  FREELANCER_REPLIES,
 } from '../data/mockData';
 
 interface MessagesScreenProps {
   matches: MatchRecord[];
   role: 'freelancer' | 'business';
   activeChatId: number | null;
+  currentUserId?: string;
   onSelectChat: (id: number | null) => void;
   onSendMessage: (matchId: number, text: string) => void;
 }
@@ -43,11 +42,11 @@ export function MessagesScreen({
   matches,
   role,
   activeChatId,
+  currentUserId,
   onSelectChat,
   onSendMessage,
 }: MessagesScreenProps) {
   const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
   const [viewingProfile, setViewingProfile] = useState<GigItem | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -58,7 +57,7 @@ export function MessagesScreen({
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeMatch?.messages, isTyping]);
+  }, [activeMatch?.messages]);
 
   const handleSend = (textToSend?: string) => {
     const text = (textToSend || inputText).trim();
@@ -66,15 +65,6 @@ export function MessagesScreen({
 
     onSendMessage(activeMatch.id, text);
     setInputText('');
-
-    // Simulate typing and reply from the opposite role (Freelancer reply vs Business Client reply)
-    setIsTyping(true);
-    setTimeout(() => {
-      setIsTyping(false);
-      const replyPool = role === 'business' ? FREELANCER_REPLIES : CLIENT_REPLIES;
-      const reply = replyPool[Math.floor(Math.random() * replyPool.length)];
-      onSendMessage(activeMatch.id, `__THEM__:${reply}`);
-    }, 1200);
   };
 
   // 1. Detailed Chat View
@@ -157,35 +147,32 @@ export function MessagesScreen({
               </p>
             </div>
           ) : (
-            activeMatch.messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${
-                  msg.from === 'me' ? 'items-end' : 'items-start'
-                }`}
-              >
+            activeMatch.messages.map((msg) => {
+              const isMe = msg.senderId
+                ? msg.senderId === currentUserId
+                : msg.from === 'me';
+              return (
                 <div
-                  className={`max-w-[82%] px-3.5 py-2.5 rounded-[18px] text-[13.5px] font-medium leading-snug border-2 border-black shadow-[2px_2px_0px_0px_#000] ${
-                    msg.from === 'me'
-                      ? 'bg-[#FFC629] text-black rounded-br-none'
-                      : 'bg-white text-black rounded-bl-none'
+                  key={msg.id}
+                  className={`flex flex-col ${
+                    isMe ? 'items-end' : 'items-start'
                   }`}
                 >
-                  {msg.text}
+                  <div
+                    className={`max-w-[82%] px-3.5 py-2.5 rounded-[18px] text-[13.5px] font-medium leading-snug border-2 border-black shadow-[2px_2px_0px_0px_#000] ${
+                      isMe
+                        ? 'bg-[#FFC629] text-black rounded-br-none'
+                        : 'bg-white text-black rounded-bl-none'
+                    }`}
+                  >
+                    {msg.text}
+                  </div>
+                  <span className="text-[9.5px] font-semibold text-[#8E8E8E] mt-0.5 px-1">
+                    {msg.timestamp}
+                  </span>
                 </div>
-                <span className="text-[9.5px] font-semibold text-[#8E8E8E] mt-0.5 px-1">
-                  {msg.timestamp}
-                </span>
-              </div>
-            ))
-          )}
-
-          {isTyping && (
-            <div className="flex items-center gap-1.5 bg-white border-2 border-black px-3 py-2 rounded-2xl w-fit shadow-[2px_2px_0px_0px_#000]">
-              <span className="w-2 h-2 rounded-full bg-black animate-bounce" />
-              <span className="w-2 h-2 rounded-full bg-black animate-bounce [animation-delay:0.2s]" />
-              <span className="w-2 h-2 rounded-full bg-black animate-bounce [animation-delay:0.4s]" />
-            </div>
+              );
+            })
           )}
           <div ref={chatEndRef} />
         </div>

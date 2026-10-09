@@ -31,6 +31,7 @@ export const GIG_CATEGORIES: GigCategory[] = [
 
 export interface GigItem {
   id: string;
+  userId?: string;
   rate: string;
   unit: string;
   title: string;
@@ -47,7 +48,8 @@ export interface GigItem {
 
 export interface ChatMessage {
   id: string;
-  from: 'me' | 'them';
+  senderId?: string;
+  from?: 'me' | 'them';
   text: string;
   timestamp: string;
 }
@@ -55,9 +57,18 @@ export interface ChatMessage {
 export interface MatchRecord {
   id: number;
   job: GigItem;
+  partnerUserId?: string;
   expiresAt: number; // timestamp ms
   messages: ChatMessage[];
   matchedAt: string;
+}
+
+export interface SwipeRecord {
+  userId: string;
+  targetUserId?: string;
+  itemId: string;
+  direction: 'left' | 'right' | 'up';
+  timestamp?: any;
 }
 
 export interface UserProfile {
@@ -78,6 +89,13 @@ export interface UserProfile {
     hired: number;
     ratingOrResponse: string;
   };
+}
+
+export const ADMIN_EMAIL = 'giglycompany@gmail.com';
+
+export function isAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return email.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }
 
 export type AppScreen =

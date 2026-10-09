@@ -416,6 +416,7 @@ export function convertProfileToGigItem(user: UserProfile, uid?: string): GigIte
   const effectiveId = user.userId || uid || (user.email ? `user-${encodeEmailKey(user.email)}` : `user-${Date.now()}`);
   return {
     id: effectiveId,
+    userId: user.userId || uid || effectiveId,
     rate: user.rateOrBudget || (isFreelancer ? '$60 / hr' : '$1,500 project'),
     unit: '',
     title: user.roleTitle || (isFreelancer ? 'Freelancer' : 'Hiring Project'),
@@ -601,6 +602,7 @@ export function subscribeToGigs(
           ) {
             list.push({
               id: docSnap.id,
+              userId: data.userId || (docSnap.id.startsWith('gig-user-') ? docSnap.id.replace('gig-user-', '') : docSnap.id),
               rate: data.rate || '$50',
               unit: data.unit || '',
               title: data.title || '',
@@ -641,6 +643,7 @@ export function subscribeToGigs(
           ) {
             list.push({
               id: docSnap.id,
+              userId: data.userId || (docSnap.id.startsWith('gig-user-') ? docSnap.id.replace('gig-user-', '') : docSnap.id),
               rate: data.rate || '$50',
               unit: data.unit || '',
               title: data.title || '',
@@ -672,16 +675,33 @@ export function subscribeToGigs(
 }
 
 /**
- * Record a swipe action to Firestore
+ * Helper to extract target user's UID from a GigItem
+ */
+export function getTargetUserIdFromGig(item: GigItem): string {
+  if (item.userId && item.userId !== 'anonymous') return item.userId;
+  if (item.id.startsWith('gig-user-')) return item.id.replace('gig-user-', '');
+  if (item.id.startsWith('usr_')) return item.id;
+  if (item.id.startsWith('user-')) return item.id;
+  return item.id;
+}
+
+/**
+ * Record a swipe action to Firestore and localStorage
  */
 export async function recordSwipeToFirestore(
   userId: string,
   itemId: string,
-  direction: 'left' | 'right' | 'up'
+  direction: 'left' | 'right' | 'up',
+  targetUserId?: string
 ) {
+  const effectiveTargetId =
+    targetUserId || (itemId.startsWith('gig-user-') ? itemId.replace('gig-user-', '') : itemId);
+
+  // 1. Record to Firestore
   try {
     await addDoc(collection(db, 'swipes'), {
       userId: userId || 'anonymous',
+      targetUserId: effectiveTargetId,
       itemId,
       direction,
       timestamp: serverTimestamp(),
@@ -689,15 +709,230 @@ export async function recordSwipeToFirestore(
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, 'swipes');
   }
+
+  // 2. Cache in localStorage for instant offline access and cross-profile testing
+  try {
+    const localKey = `gigly_swipes_${userId}`;
+    const raw = localStorage.getItem(localKey);
+    const swipes: any[] = raw ? JSON.parse(raw) : [];
+    swipes.push({
+      userId,
+      targetUserId: effectiveTargetId,
+      itemId,
+      direction,
+      timestamp: Date.now(),
+    });
+    localStorage.setItem(localKey, JSON.stringify(swipes));
+  } catch {}
 }
 
 /**
- * Save a new match to Firestore
+ * Get all profile/item IDs a user has already swiped on to prevent duplicates
+ */
+export async function getUserSwipedIds(userId: string): Promise<string[]> {
+  if (!userId || userId === 'guest-user') return [];
+  const set = new Set<string>();
+
+  // 1. Instant check from local cache
+  try {
+    const local = localStorage.getItem(`gigly_swiped_items_${userId}`);
+    if (local) {
+      const arr = JSON.parse(local);
+      if (Array.isArray(arr)) {
+        arr.forEach((id: string) => set.add(id));
+      }
+    }
+  } catch {}
+
+  // Also read recorded swipes list
+  try {
+    const raw = localStorage.getItem(`gigly_swipes_${userId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((s: any) => {
+          if (s.itemId) set.add(s.itemId);
+          if (s.targetUserId) {
+            set.add(s.targetUserId);
+            set.add(`gig-user-${s.targetUserId}`);
+          }
+        });
+      }
+    }
+  } catch {}
+
+  // 2. Query Firestore swipes collection
+  try {
+    const q = query(collection(db, 'swipes'), where('userId', '==', userId));
+    const snap = await getDocs(q);
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data.itemId) set.add(data.itemId);
+      if (data.targetUserId) {
+        set.add(data.targetUserId);
+        set.add(`gig-user-${data.targetUserId}`);
+      }
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'swipes');
+  }
+
+  const result = Array.from(set);
+  try {
+    localStorage.setItem(`gigly_swiped_items_${userId}`, JSON.stringify(result));
+  } catch {}
+  return result;
+}
+
+export interface MutualMatchResult {
+  isMutual: boolean;
+  match?: MatchRecord;
+  targetUserHasLikedMe?: boolean;
+}
+
+/**
+ * Check if the other user has ALSO liked the current user (true mutual match)
+ * If mutual: persists match for BOTH users and returns { isMutual: true, match }
+ * If one-way: records like and returns { isMutual: false }
+ */
+export async function checkMutualLikeAndMatch(
+  currentUserId: string,
+  currentUserProfile: UserProfile,
+  targetItem: GigItem,
+  direction: 'left' | 'right' | 'up'
+): Promise<MutualMatchResult> {
+  const targetUserId = getTargetUserIdFromGig(targetItem);
+
+  // 1. Always record current user's swipe first
+  await recordSwipeToFirestore(currentUserId, targetItem.id, direction, targetUserId);
+
+  // If swiped left (pass), it's never a match
+  if (direction === 'left') {
+    return { isMutual: false, targetUserHasLikedMe: false };
+  }
+
+  // 2. Check if the target user has ALREADY swiped right or up on the current user
+  let targetHasLikedMe = false;
+
+  // Check Firestore swipes collection
+  try {
+    const q = query(
+      collection(db, 'swipes'),
+      where('userId', '==', targetUserId)
+    );
+    const snap = await getDocs(q);
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      const dir = data.direction;
+      if (dir === 'right' || dir === 'up') {
+        const matchesCurrent =
+          data.targetUserId === currentUserId ||
+          data.itemId === currentUserId ||
+          data.itemId === `gig-user-${currentUserId}` ||
+          (currentUserProfile.userId && data.targetUserId === currentUserProfile.userId) ||
+          (currentUserProfile.userId && data.itemId === currentUserProfile.userId) ||
+          (currentUserProfile.email && data.itemId === `usr_${encodeEmailKey(currentUserProfile.email)}`);
+
+        if (matchesCurrent) {
+          targetHasLikedMe = true;
+        }
+      }
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'swipes');
+  }
+
+  // Also check local storage (supports testing between multiple users on same browser/device)
+  if (!targetHasLikedMe) {
+    try {
+      const localSwipesRaw = localStorage.getItem(`gigly_swipes_${targetUserId}`);
+      if (localSwipesRaw) {
+        const localSwipes = JSON.parse(localSwipesRaw);
+        if (Array.isArray(localSwipes)) {
+          for (const s of localSwipes) {
+            if (s.direction === 'right' || s.direction === 'up') {
+              if (
+                s.targetUserId === currentUserId ||
+                s.itemId === currentUserId ||
+                s.itemId === `gig-user-${currentUserId}` ||
+                (currentUserProfile.userId && s.targetUserId === currentUserProfile.userId)
+              ) {
+                targetHasLikedMe = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 🌟 CASE 1: MUTUAL MATCH! Both people liked each other!
+  if (targetHasLikedMe) {
+    const matchId = Date.now();
+
+    // Match record for current user viewing target user's card
+    const matchForCurrentUser: MatchRecord = {
+      id: matchId,
+      job: targetItem,
+      partnerUserId: targetUserId,
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+      messages: [],
+      matchedAt: 'Just now',
+    };
+    await saveMatchToFirestore(matchForCurrentUser, currentUserId);
+
+    // Reciprocal match record for target user viewing current user's card
+    const myGigCard = convertProfileToGigItem(currentUserProfile, currentUserId);
+    const matchForTargetUser: MatchRecord = {
+      id: matchId,
+      job: myGigCard,
+      partnerUserId: currentUserId,
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+      messages: [],
+      matchedAt: 'Just now',
+    };
+    await saveMatchToFirestore(matchForTargetUser, targetUserId);
+
+    // Update local storage caches for instant UI update
+    try {
+      const myMatchesRaw = localStorage.getItem(`gigly_matches_${currentUserId}`);
+      const myMatches = myMatchesRaw ? JSON.parse(myMatchesRaw) : [];
+      localStorage.setItem(
+        `gigly_matches_${currentUserId}`,
+        JSON.stringify([matchForCurrentUser, ...myMatches.filter((m: any) => m.id !== matchId)])
+      );
+
+      const targetMatchesRaw = localStorage.getItem(`gigly_matches_${targetUserId}`);
+      const targetMatches = targetMatchesRaw ? JSON.parse(targetMatchesRaw) : [];
+      localStorage.setItem(
+        `gigly_matches_${targetUserId}`,
+        JSON.stringify([matchForTargetUser, ...targetMatches.filter((m: any) => m.id !== matchId)])
+      );
+    } catch {}
+
+    return {
+      isMutual: true,
+      match: matchForCurrentUser,
+      targetUserHasLikedMe: true,
+    };
+  }
+
+  // 🌟 CASE 2: ONE-WAY LIKE (Interest registered, awaiting other party to swipe right back)
+  return {
+    isMutual: false,
+    targetUserHasLikedMe: false,
+  };
+}
+
+/**
+ * Save a match to Firestore under user-specific document key
  */
 export async function saveMatchToFirestore(match: MatchRecord, userId: string) {
-  const matchPath = `matches/${match.id}`;
+  const docKey = `${match.id}_${userId}`;
+  const matchPath = `matches/${docKey}`;
   try {
-    const matchRef = doc(db, 'matches', String(match.id));
+    const matchRef = doc(db, 'matches', docKey);
     await setDoc(matchRef, {
       ...match,
       userId: userId || 'guest',
@@ -709,18 +944,37 @@ export async function saveMatchToFirestore(match: MatchRecord, userId: string) {
 }
 
 /**
- * Update messages for a match in Firestore
+ * Update messages for a match across both participants in Firestore
  */
-export async function syncMatchMessagesToFirestore(matchId: number, messages: any[]) {
-  const matchPath = `matches/${matchId}`;
+export async function syncMatchMessagesToFirestore(matchId: number, messages: any[], userId?: string) {
   try {
-    const matchRef = doc(db, 'matches', String(matchId));
+    const q = query(collection(db, 'matches'), where('id', '==', matchId));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const updatePromises: Promise<void>[] = [];
+      snap.forEach((docSnap) => {
+        updatePromises.push(
+          updateDoc(doc(db, 'matches', docSnap.id), {
+            messages,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      });
+      await Promise.all(updatePromises);
+      return;
+    }
+  } catch {}
+
+  // Fallback to direct key
+  try {
+    const docKey = userId ? `${matchId}_${userId}` : String(matchId);
+    const matchRef = doc(db, 'matches', docKey);
     await updateDoc(matchRef, {
       messages,
       updatedAt: serverTimestamp(),
     });
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, matchPath);
+    handleFirestoreError(err, OperationType.UPDATE, `matches/${matchId}`);
   }
 }
 

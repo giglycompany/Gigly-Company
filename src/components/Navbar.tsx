@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { Compass, Heart, MessageSquare, User } from 'lucide-react';
+import { Compass, Heart, MessageSquare, User, Shield } from 'lucide-react';
 import { AppScreen } from '../types';
 
 interface NavbarProps {
@@ -7,6 +7,7 @@ interface NavbarProps {
   onNavigate: (screen: AppScreen) => void;
   matchesBadgeCount: number;
   messagesBadgeCount: number;
+  isAdmin?: boolean;
 }
 
 export function Navbar({
@@ -14,6 +15,7 @@ export function Navbar({
   onNavigate,
   matchesBadgeCount,
   messagesBadgeCount,
+  isAdmin = false,
 }: NavbarProps) {
   const tabs = [
     {
@@ -38,6 +40,15 @@ export function Navbar({
       label: 'Profile',
       icon: User,
     },
+    ...(isAdmin
+      ? [
+          {
+            id: 'admin' as AppScreen,
+            label: 'Admin',
+            icon: Shield,
+          },
+        ]
+      : []),
   ];
 
   return (

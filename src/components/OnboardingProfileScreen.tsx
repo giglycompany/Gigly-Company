@@ -12,13 +12,14 @@ import {
   ShieldCheck,
   ArrowRight,
 } from 'lucide-react';
-import { GigCategory, GIG_CATEGORIES, UserProfile } from '../types';
+import { GigCategory, GIG_CATEGORIES, UserProfile, isAdminEmail } from '../types';
 import { GiglyLogo } from './GiglyLogo';
 
 interface OnboardingProfileScreenProps {
   userEmail: string;
   initialName?: string;
   onSaveProfile: (profile: UserProfile) => Promise<void> | void;
+  onGoToAdmin?: () => void;
 }
 
 const POPULAR_SKILLS = [
@@ -40,6 +41,7 @@ export function OnboardingProfileScreen({
   userEmail,
   initialName = '',
   onSaveProfile,
+  onGoToAdmin,
 }: OnboardingProfileScreenProps) {
   const [role, setRole] = useState<'freelancer' | 'business'>('freelancer');
   const [name, setName] = useState(initialName || (userEmail ? userEmail.split('@')[0] : ''));
@@ -55,6 +57,13 @@ export function OnboardingProfileScreen({
   const [customSkill, setCustomSkill] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Automatically take admin directly to admin portal
+  React.useEffect(() => {
+    if (isAdminEmail(userEmail) && onGoToAdmin) {
+      onGoToAdmin();
+    }
+  }, [userEmail, onGoToAdmin]);
 
   // When switching role, adjust default title and rate placeholder if user hasn't heavily customized
   const handleRoleChange = (newRole: 'freelancer' | 'business') => {
@@ -159,6 +168,30 @@ export function OnboardingProfileScreen({
           <span className="truncate">{userEmail}</span>
         </div>
       </div>
+
+      {isAdminEmail(userEmail) && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="mb-5 p-4 bg-[#FFF9E6] border-[2.5px] border-black rounded-[20px] shadow-[4px_4px_0px_0px_#000] flex items-center justify-between gap-3"
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="text-2xl">👑</span>
+            <div>
+              <div className="font-display font-[800] text-[14.5px] text-black">Administrator Portal</div>
+              <div className="text-[11.5px] font-semibold text-[#666]">Direct access detected for {userEmail}</div>
+            </div>
+          </div>
+          {onGoToAdmin && (
+            <button
+              onClick={onGoToAdmin}
+              className="px-3.5 py-2 bg-black text-[#FFC629] font-display font-extrabold text-[12px] rounded-xl hover:bg-[#222] transition-colors cursor-pointer border-2 border-black shadow-[2px_2px_0px_0px_#FFC629]"
+            >
+              Enter Admin &rarr;
+            </button>
+          )}
+        </motion.div>
+      )}
 
       <div className="mb-6">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FFC629] border-[2px] border-black text-[11px] font-black uppercase tracking-wider mb-2 shadow-[2px_2px_0px_0px_#000]">

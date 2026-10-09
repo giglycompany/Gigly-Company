@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { UserProfile } from '../types';
-import { Check, Edit3, ShieldCheck, Star, LogOut, Mail, Tag } from 'lucide-react';
+import { UserProfile, isAdminEmail } from '../types';
+import { Check, Edit3, ShieldCheck, Star, LogOut, Mail, Tag, Shield } from 'lucide-react';
 
 interface ProfileScreenProps {
   profile: UserProfile;
   onUpdateProfile: (updated: Partial<UserProfile>) => void;
   onLogout?: () => void;
+  onOpenAdmin?: () => void;
 }
 
-export function ProfileScreen({ profile, onUpdateProfile, onLogout }: ProfileScreenProps) {
+export function ProfileScreen({ profile, onUpdateProfile, onLogout, onOpenAdmin }: ProfileScreenProps) {
   const [isEditing, setIsEditing] = useState(false);
 
   // Form states
@@ -234,6 +235,27 @@ export function ProfileScreen({ profile, onUpdateProfile, onLogout }: ProfileScr
           </div>
         )}
       </div>
+
+      {/* Admin Access Quick Switch */}
+      {isAdminEmail(profile.email) && onOpenAdmin && (
+        <div className="mt-4 p-4 bg-[#FFF9E6] border-[2.5px] border-black rounded-[20px] shadow-[4px_4px_0px_0px_#000] flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-[#FFC629] border border-black flex items-center justify-center">
+              <Shield className="w-4 h-4 text-black stroke-[2.5]" />
+            </div>
+            <div>
+              <div className="font-display font-[800] text-[13.5px] text-black">Administrator Portal</div>
+              <div className="text-[11px] font-semibold text-[#666]">Platform metrics & live users</div>
+            </div>
+          </div>
+          <button
+            onClick={onOpenAdmin}
+            className="px-3.5 py-1.5 bg-black text-[#FFC629] font-display font-bold text-[12px] rounded-xl hover:bg-[#222] transition-colors cursor-pointer border border-black shadow-[2px_2px_0px_0px_#000]"
+          >
+            Open &rarr;
+          </button>
+        </div>
+      )}
 
       {/* Account Info & Sign Out */}
       <div className="mt-4 p-4 bg-white border-[2.5px] border-black rounded-[20px] shadow-[3px_4px_0px_0px_#000] flex items-center justify-between">

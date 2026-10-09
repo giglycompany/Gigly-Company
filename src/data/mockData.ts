@@ -23,19 +23,3 @@ export const BUSINESS_SUGGESTIONS = [
 
 // Deprecated fallback alias
 export const SUGGESTIONS = FREELANCER_SUGGESTIONS;
-
-export const CLIENT_REPLIES = [
-  "Thanks for reaching out! Can you share a couple of past relevant examples?",
-  "Great to connect — what rate were you thinking for this scope?",
-  "Sounds great! When could you kick this off?",
-  "Appreciate the quick reply! Let's hop on a 15-min sync this week.",
-  "Your background looks like a great fit! Sending over the brief now.",
-];
-
-export const FREELANCER_REPLIES = [
-  "Hi! Yes, I'm available and would love to collaborate on this.",
-  "I've worked on similar projects recently — happy to share live links!",
-  "My rate fits your range. When is your target completion date?",
-  "A 15-min sync sounds perfect. I'm open anytime tomorrow afternoon.",
-  "Thanks for reaching out! The project specs match my core skillset perfectly.",
-];

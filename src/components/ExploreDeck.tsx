@@ -9,6 +9,7 @@ interface ExploreDeckProps {
   items: GigItem[];
   role: 'freelancer' | 'business';
   matchesCount: number;
+  swipedIds?: Set<string>;
   onSwipe: (item: GigItem, direction: 'left' | 'right' | 'up') => void;
   onReshuffle: () => void;
 }
@@ -22,9 +23,24 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
-export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }: ExploreDeckProps) {
+export function ExploreDeck({
+  items,
+  role,
+  matchesCount,
+  swipedIds: externalSwipedIds,
+  onSwipe,
+  onReshuffle,
+}: ExploreDeckProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [swipedIds, setSwipedIds] = useState<Set<string>>(new Set());
+  const [internalSwipedIds, setInternalSwipedIds] = useState<Set<string>>(new Set());
+  const swipedIds = externalSwipedIds || internalSwipedIds;
+
+  const [feedbackNotice, setFeedbackNotice] = useState<{
+    text: string;
+    type: 'like' | 'superlike' | 'pass';
+  } | null>(null);
+  const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [isSuperLiking, setIsSuperLiking] = useState<boolean>(false);
   const [superLikedItem, setSuperLikedItem] = useState<GigItem | null>(null);
@@ -32,10 +48,23 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
   const dropdownRef = useRef<HTMLDivElement>(null);
   const superLikeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const showFeedback = (text: string, type: 'like' | 'superlike' | 'pass') => {
+    if (feedbackTimerRef.current) {
+      clearTimeout(feedbackTimerRef.current);
+    }
+    setFeedbackNotice({ text, type });
+    feedbackTimerRef.current = setTimeout(() => {
+      setFeedbackNotice(null);
+    }, 3500);
+  };
+
   useEffect(() => {
     return () => {
       if (superLikeTimerRef.current) {
         clearTimeout(superLikeTimerRef.current);
+      }
+      if (feedbackTimerRef.current) {
+        clearTimeout(feedbackTimerRef.current);
       }
     };
   }, []);
@@ -88,12 +117,14 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
     setIsMouseDown(false);
   };
 
-  // Filter items based on selected category and swiped state
+  // Filter items based on selected category and swiped state (strictly exclude already swiped)
   const availableItems = useMemo(() => {
     return items.filter((item) => {
-      const notSwiped = !swipedIds.has(item.id);
-      if (selectedCategory === 'All') return notSwiped;
-      return notSwiped && item.category === selectedCategory;
+      const isAlreadySwiped =
+        swipedIds.has(item.id) || (item.userId && swipedIds.has(item.userId));
+      if (isAlreadySwiped) return false;
+      if (selectedCategory === 'All') return true;
+      return item.category === selectedCategory;
     });
   }, [items, selectedCategory, swipedIds]);
 
@@ -101,7 +132,9 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = { All: 0 };
     items.forEach((item) => {
-      if (!swipedIds.has(item.id)) {
+      const isAlreadySwiped =
+        swipedIds.has(item.id) || (item.userId && swipedIds.has(item.userId));
+      if (!isAlreadySwiped) {
         counts.All = (counts.All || 0) + 1;
         if (item.category) {
           counts[item.category] = (counts[item.category] || 0) + 1;
@@ -114,13 +147,26 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
   const handleCardSwipe = (direction: 'left' | 'right' | 'up') => {
     if (availableItems.length === 0 || isSuperLiking) return;
     const topCard = availableItems[0];
-    setSwipedIds((prev) => new Set([...prev, topCard.id]));
+    const cardTitle = topCard.client || topCard.title || 'Profile';
+
+    setInternalSwipedIds((prev) => new Set([...prev, topCard.id]));
+
+    if (direction === 'right') {
+      showFeedback(`❤️ Liked ${cardTitle}! If they swipe right on you too, it's a match!`, 'like');
+    } else if (direction === 'up') {
+      showFeedback(`⭐ Super Liked ${cardTitle}! Priority alert sent.`, 'superlike');
+    } else {
+      showFeedback(`Passed on ${cardTitle}.`, 'pass');
+    }
+
     onSwipe(topCard, direction);
   };
 
   const handleSuperLike = () => {
     if (availableItems.length === 0 || isSuperLiking) return;
     const topCard = availableItems[0];
+    const cardTitle = topCard.client || topCard.title || 'Profile';
+
     setIsSuperLiking(true);
     setSuperLikedItem(topCard);
     setFlyUpId(topCard.id);
@@ -129,19 +175,15 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
       clearTimeout(superLikeTimerRef.current);
     }
 
-    // Celebrate with Super Like animation and fly the card up, then trigger match cleanly
+    // Celebrate with Super Like animation and fly the card up, then trigger swipe cleanly
     superLikeTimerRef.current = setTimeout(() => {
-      setSwipedIds((prev) => new Set([...prev, topCard.id]));
+      setInternalSwipedIds((prev) => new Set([...prev, topCard.id]));
       setIsSuperLiking(false);
       setFlyUpId(null);
       setSuperLikedItem(null);
+      showFeedback(`⭐ Super Liked ${cardTitle}! Priority interest sent.`, 'superlike');
       onSwipe(topCard, 'up');
     }, 850);
-  };
-
-  const handleResetDeck = () => {
-    setSwipedIds(new Set());
-    onReshuffle();
   };
 
   const visibleCards = availableItems.slice(0, 3);
@@ -163,7 +205,7 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
       </header>
 
       {/* Tagline */}
-      <div className="w-full font-display font-bold text-[13.5px] text-black mb-3">
+      <div className="w-full font-display font-bold text-[13.5px] text-black mb-2">
         {role === 'freelancer' ? (
           <>
             Swipe right on work worth doing.{' '}
@@ -180,6 +222,34 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
           </>
         )}
       </div>
+
+      {/* Real-time Swipe Feedback Pill */}
+      <AnimatePresence>
+        {feedbackNotice && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.96 }}
+            className={`w-full mb-3 px-3 py-2 rounded-xl border-[2px] border-black shadow-[2.5px_2.5px_0px_0px_#000] text-[12px] font-display font-[800] flex items-center justify-between gap-2 select-none ${
+              feedbackNotice.type === 'like'
+                ? 'bg-[#FFF9E6] text-black'
+                : feedbackNotice.type === 'superlike'
+                ? 'bg-[#FFC629] text-black'
+                : 'bg-[#F2F2F2] text-[#444]'
+            }`}
+          >
+            <div className="flex items-center gap-1.5 leading-tight">
+              <span>{feedbackNotice.text}</span>
+            </div>
+            <button
+              onClick={() => setFeedbackNotice(null)}
+              className="text-black/60 hover:text-black font-extrabold text-[14px] px-1 cursor-pointer"
+            >
+              ×
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* TOP FILTERS: HORIZONTALLY SCROLLABLE WORK / SKILL PILLS */}
       <div className="w-full mb-3.5">
@@ -376,36 +446,25 @@ export function ExploreDeck({ items, role, matchesCount, onSwipe, onReshuffle }:
               <>
                 <h3 className="font-display font-[800] text-[19px] text-black mb-1">
                   {selectedCategory !== 'All'
-                    ? `No more "${selectedCategory}" cards!`
+                    ? `No more "${selectedCategory}" profiles!`
                     : "You're all caught up!"}
                 </h3>
-                <p className="text-[12.5px] font-medium text-[#6E6E6E] max-w-[250px] mb-5">
+                <p className="text-[12.5px] font-medium text-[#6E6E6E] max-w-[270px] mb-5 leading-relaxed">
                   {selectedCategory !== 'All'
-                    ? `Switch to another category or reshuffle the entire ${
-                        role === 'freelancer' ? 'gigs' : 'talent'
-                      } deck.`
-                    : `You have reviewed all current ${
+                    ? `Switch to another category to view more profiles.`
+                    : `You have reviewed all active ${
                         role === 'freelancer' ? 'businesses' : 'freelancers'
-                      }. Reshuffle to browse them again.`}
+                      }. When new members register, they'll appear here live!`}
                 </p>
-                <div className="flex flex-col gap-2 w-full max-w-[200px]">
-                  {selectedCategory !== 'All' && (
-                    <button
-                      onClick={() => setSelectedCategory('All')}
-                      className="py-2.5 px-4 bg-white text-black font-display font-[800] text-[12px] rounded-full border-[2px] border-black flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_0px_#000] hover:bg-[#F5F5F5] active:translate-y-[1px]"
-                    >
-                      <Filter className="w-3.5 h-3.5" />
-                      <span>View All Categories</span>
-                    </button>
-                  )}
+                {selectedCategory !== 'All' && (
                   <button
-                    onClick={handleResetDeck}
-                    className="py-2.5 px-4 bg-[#FFC629] text-black font-display font-[800] text-[12px] rounded-full border-[2px] border-black flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_0px_#000] hover:translate-y-[-1px] active:translate-y-[1px]"
+                    onClick={() => setSelectedCategory('All')}
+                    className="py-2.5 px-5 bg-white text-black font-display font-[800] text-[12px] rounded-full border-[2px] border-black flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_0px_#000] hover:bg-[#F5F5F5] active:translate-y-[1px] cursor-pointer"
                   >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Reshuffle Deck</span>
+                    <Filter className="w-3.5 h-3.5" />
+                    <span>View All Categories</span>
                   </button>
-                </div>
+                )}
               </>
             )}
           </motion.div>

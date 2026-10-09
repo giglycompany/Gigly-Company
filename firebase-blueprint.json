@@ -49,6 +49,7 @@
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
+        "targetUserId": { "type": "string" },
         "itemId": { "type": "string" },
         "direction": { "type": "string", "enum": ["left", "right", "up"] },
         "createdAt": { "type": "string", "format": "date-time" }
@@ -62,6 +63,7 @@
       "properties": {
         "id": { "type": "number" },
         "userId": { "type": "string" },
+        "partnerUserId": { "type": "string" },
         "job": { "type": "object" },
         "expiresAt": { "type": "number" },
         "messages": { "type": "array" },

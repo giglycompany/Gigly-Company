@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, Sparkles, KeyRound, Mail, Lock, Copy, Check, ExternalLink, AlertTriangle, X } from 'lucide-react';
 import { auth, signInWithGoogle, loginOrRegisterAccount, AuthUserSession } from '../lib/firebase';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { GiglyLogo } from './GiglyLogo';
 
@@ -244,7 +245,7 @@ export function AuthScreen({ onSuccess, onAdminClick, onBackToStartup }: AuthScr
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-2">
               <a
-                href="https://console.firebase.google.com/project/gigly-company-2/authentication/settings"
+                href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`}
                 target="_blank"
                 rel="noreferrer"
                 className="py-1.5 px-3 bg-black text-white text-[11px] font-bold rounded-xl flex items-center justify-center gap-1.5 hover:bg-[#222] transition-colors text-center"

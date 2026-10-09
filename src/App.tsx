@@ -5,6 +5,8 @@ import {
   GigItem,
   MatchRecord,
   UserProfile,
+  isAdminEmail,
+  ADMIN_EMAIL,
 } from './types';
 import {
   auth,
@@ -19,6 +21,8 @@ import {
   getActiveUserSession,
   logoutUser,
   AuthUserSession,
+  getUserSwipedIds,
+  checkMutualLikeAndMatch,
 } from './lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { StartupAnimation } from './components/StartupAnimation';
@@ -50,6 +54,15 @@ export default function App() {
   const [isSuperLikeMatch, setIsSuperLikeMatch] = useState(false);
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
 
+  // Persistent Set of Swiped Profiles (Cards already reviewed)
+  const [swipedIds, setSwipedIds] = useState<Set<string>>(() => {
+    try {
+      const cached = localStorage.getItem('gigly_swiped_items_guest-user');
+      if (cached) return new Set(JSON.parse(cached));
+    } catch {}
+    return new Set();
+  });
+
   // User Profile State with local persistence fallback
   const [profile, setProfile] = useState<UserProfile>(() => {
     const defaultProfile: UserProfile = {
@@ -79,6 +92,21 @@ export default function App() {
     // 1. Check local session first for instant resume
     const localSession = getActiveUserSession();
     if (localSession && localSession.uid) {
+      // Direct admin session directly to admin portal
+      if (isAdminEmail(localSession.email)) {
+        sessionStorage.setItem('gigly_admin_session', 'true');
+        setCurrentUserId(localSession.uid);
+        setProfile((prev) => ({
+          ...prev,
+          email: localSession.email,
+          name: localSession.displayName || 'Gigly Admin',
+          userId: localSession.uid,
+          profileCompleted: true,
+        }));
+        setCurrentScreen('admin');
+        return;
+      }
+
       setCurrentUserId(localSession.uid);
       const cached = localStorage.getItem(`gigly_profile_${localSession.uid}`);
       if (cached) {
@@ -104,6 +132,21 @@ export default function App() {
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUserId(user.uid);
+        const userEmail = (user.email || '').trim().toLowerCase();
+
+        // 🌟 CRITICAL: If signed in with admin email (Google or password), route directly to Admin Portal!
+        if (isAdminEmail(userEmail)) {
+          sessionStorage.setItem('gigly_admin_session', 'true');
+          setProfile((prev) => ({
+            ...prev,
+            email: user.email || ADMIN_EMAIL,
+            name: user.displayName || 'Gigly Admin',
+            userId: user.uid,
+            profileCompleted: true,
+          }));
+          setCurrentScreen('admin');
+          return;
+        }
 
         // Try local storage cache for instant 0ms rendering
         try {
@@ -180,6 +223,35 @@ export default function App() {
     return () => unsubMatches();
   }, [currentUserId]);
 
+  // Load and sync reviewed/swiped card IDs whenever current user changes
+  useEffect(() => {
+    if (currentUserId) {
+      try {
+        const local = localStorage.getItem(`gigly_swiped_items_${currentUserId}`);
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed)) {
+            setSwipedIds(new Set(parsed));
+          }
+        }
+      } catch {}
+
+      if (currentUserId !== 'guest-user') {
+        getUserSwipedIds(currentUserId).then((ids) => {
+          if (ids && ids.length > 0) {
+            setSwipedIds((prev) => {
+              const merged = new Set([...prev, ...ids]);
+              try {
+                localStorage.setItem(`gigly_swiped_items_${currentUserId}`, JSON.stringify(Array.from(merged)));
+              } catch {}
+              return merged;
+            });
+          }
+        });
+      }
+    }
+  }, [currentUserId]);
+
   // Subscribe to real-time people who made an account from Firestore
   useEffect(() => {
     const unsubGigs = subscribeToGigs(
@@ -203,6 +275,20 @@ export default function App() {
     const user = auth.currentUser;
     const uid = session?.uid || user?.uid || currentUserId;
     const email = session?.email || user?.email || profile.email;
+
+    // 🌟 Direct administrator immediately to Admin Portal
+    if (isAdminEmail(email)) {
+      sessionStorage.setItem('gigly_admin_session', 'true');
+      setProfile((prev) => ({
+        ...prev,
+        email: email || ADMIN_EMAIL,
+        name: user?.displayName || session?.displayName || 'Gigly Admin',
+        userId: uid,
+        profileCompleted: true,
+      }));
+      setCurrentScreen('admin');
+      return;
+    }
 
     if (uid && uid !== 'guest-user') {
       setCurrentUserId(uid);
@@ -295,6 +381,9 @@ export default function App() {
 
   // Handle User Log Out
   const handleLogout = async () => {
+    try {
+      sessionStorage.removeItem('gigly_admin_session');
+    } catch {}
     await logoutUser();
     setCurrentUserId('guest-user');
     setMatches([]);
@@ -341,44 +430,51 @@ export default function App() {
     setCurrentScreen('explore');
   };
 
-  // Handle Swipe (persist to Firestore)
-  const handleSwipe = (item: GigItem, direction: 'left' | 'right' | 'up') => {
-    recordSwipeToFirestore(currentUserId, item.id, direction);
+  // Handle Swipe with True Mutual Matching & Duplicate Prevention
+  const handleSwipe = async (item: GigItem, direction: 'left' | 'right' | 'up') => {
+    // 1. Permanently record swiped profile so it never reappears in deck
+    setSwipedIds((prev) => {
+      const next = new Set(prev);
+      next.add(item.id);
+      if (item.userId) next.add(item.userId);
+      try {
+        localStorage.setItem(`gigly_swiped_items_${currentUserId}`, JSON.stringify(Array.from(next)));
+      } catch {}
+      return next;
+    });
 
-    if (direction === 'right' || direction === 'up') {
-      // Create a match
-      const newMatchId = Date.now();
-      const newMatch: MatchRecord = {
-        id: newMatchId,
-        job: item,
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-        messages: [],
-        matchedAt: 'Just now',
-      };
-
-      setMatches((prev) => [newMatch, ...prev]);
-      setIsSuperLikeMatch(direction === 'up');
-      setMatchedOverlayJob(item);
-      saveMatchToFirestore(newMatch, currentUserId);
+    // 2. Perform True Mutual Match check:
+    // Only triggers a match if the other user has ALSO liked / superliked back!
+    try {
+      const matchResult = await checkMutualLikeAndMatch(currentUserId, profile, item, direction);
+      if (matchResult.isMutual && matchResult.match) {
+        // 🎉 Genuine Mutual Match!
+        setMatches((prev) => [matchResult.match!, ...prev.filter((m) => m.id !== matchResult.match!.id)]);
+        setIsSuperLikeMatch(direction === 'up');
+        setMatchedOverlayJob(item);
+      }
+    } catch (err) {
+      console.warn('Mutual match check warning:', err);
     }
   };
 
-  // Send Message in Chat (sync to Firestore)
+  // Send Message in Chat (sync to Firestore for real users)
   const handleSendMessage = (matchId: number, text: string) => {
-    const isReply = text.startsWith('__THEM__:');
-    const cleanText = isReply ? text.replace('__THEM__:', '') : text;
+    const cleanText = text.trim();
+    if (!cleanText) return;
 
     setMatches((prev) => {
       const nextMatches = prev.map((m) => {
         if (m.id === matchId) {
           const newMsg = {
-            id: `msg-${Date.now()}-${Math.random()}`,
-            from: isReply ? ('them' as const) : ('me' as const),
+            id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            senderId: currentUserId,
+            from: 'me' as const,
             text: cleanText,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           };
           const updatedMessages = [...m.messages, newMsg];
-          syncMatchMessagesToFirestore(matchId, updatedMessages);
+          syncMatchMessagesToFirestore(matchId, updatedMessages, currentUserId);
           return {
             ...m,
             messages: updatedMessages,
@@ -398,19 +494,29 @@ export default function App() {
   // Count unread messages
   const unreadMessagesCount = matches.filter((m) => m.messages.length === 0).length;
 
-  // Guard Admin Dashboard access with verified admin session
+  // Guard Admin Dashboard access with verified admin session & route admin automatically
   useEffect(() => {
+    const isUserAdmin = isAdminEmail(profile.email) || isAdminEmail(auth.currentUser?.email);
+    if (isUserAdmin) {
+      sessionStorage.setItem('gigly_admin_session', 'true');
+    }
+
     if (currentScreen === 'admin') {
       try {
         const authed = sessionStorage.getItem('gigly_admin_session');
-        if (authed !== 'true') {
+        if (authed !== 'true' && !isUserAdmin) {
           setCurrentScreen('auth');
         }
       } catch {
-        setCurrentScreen('auth');
+        if (!isUserAdmin) {
+          setCurrentScreen('auth');
+        }
       }
+    } else if (currentScreen === 'onboarding' && isUserAdmin) {
+      // Direct administrator immediately to admin portal
+      setCurrentScreen('admin');
     }
-  }, [currentScreen]);
+  }, [currentScreen, profile.email]);
 
   return (
     <div className="min-h-screen bg-[#FFFCF5] flex justify-center text-[#1A1A1A]">
@@ -423,7 +529,10 @@ export default function App() {
       {currentScreen === 'auth' && (
         <AuthScreen
           onSuccess={handleAuthSuccess}
-          onAdminClick={() => setCurrentScreen('admin')}
+          onAdminClick={() => {
+            sessionStorage.setItem('gigly_admin_session', 'true');
+            setCurrentScreen('admin');
+          }}
           onBackToStartup={() => setCurrentScreen('startup')}
         />
       )}
@@ -434,6 +543,10 @@ export default function App() {
           userEmail={profile.email || auth.currentUser?.email || ''}
           initialName={profile.name}
           onSaveProfile={handleCompleteOnboarding}
+          onGoToAdmin={() => {
+            sessionStorage.setItem('gigly_admin_session', 'true');
+            setCurrentScreen('admin');
+          }}
         />
       )}
 
@@ -446,10 +559,7 @@ export default function App() {
       {currentScreen === 'admin' && (
         <AdminDashboard
           onBackToApp={() => {
-            try {
-              sessionStorage.removeItem('gigly_admin_session');
-            } catch {}
-            setCurrentScreen('auth');
+            setCurrentScreen('explore');
           }}
           matches={matches}
           currentProfile={profile}
@@ -474,8 +584,9 @@ export default function App() {
                   items={userRole === 'freelancer' ? jobs : candidates}
                   role={userRole}
                   matchesCount={matches.length}
+                  swipedIds={swipedIds}
                   onSwipe={handleSwipe}
-                  onReshuffle={handleReshuffle}
+                  onReshuffle={() => {}}
                 />
               </motion.div>
             )}
@@ -519,6 +630,7 @@ export default function App() {
                   matches={matches}
                   role={userRole}
                   activeChatId={activeChatId}
+                  currentUserId={currentUserId}
                   onSelectChat={(id) => setActiveChatId(id)}
                   onSendMessage={handleSendMessage}
                 />
@@ -537,6 +649,10 @@ export default function App() {
                   profile={profile}
                   onUpdateProfile={handleUpdateProfile}
                   onLogout={handleLogout}
+                  onOpenAdmin={() => {
+                    sessionStorage.setItem('gigly_admin_session', 'true');
+                    setCurrentScreen('admin');
+                  }}
                 />
               </motion.div>
             )}
@@ -545,9 +661,13 @@ export default function App() {
           {/* Bottom Floating Navigation */}
           <Navbar
             currentScreen={currentScreen}
+            isAdmin={isAdminEmail(profile.email) || isAdminEmail(auth.currentUser?.email)}
             onNavigate={(screen) => {
               if (screen === 'messages') {
                 setActiveChatId(null);
+              }
+              if (screen === 'admin') {
+                sessionStorage.setItem('gigly_admin_session', 'true');
               }
               setCurrentScreen(screen);
             }}
