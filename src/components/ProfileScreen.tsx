@@ -14,11 +14,19 @@ export function ProfileScreen({ profile, onUpdateProfile, onLogout, onOpenAdmin 
   const [isEditing, setIsEditing] = useState(false);
 
   // Form states
-  const [name, setName] = useState(profile.name);
-  const [roleTitle, setRoleTitle] = useState(profile.roleTitle);
-  const [rateOrBudget, setRateOrBudget] = useState(profile.rateOrBudget);
-  const [bio, setBio] = useState(profile.bio);
-  const [skillsStr, setSkillsStr] = useState(profile.skills.join(', '));
+  const [name, setName] = useState(profile.name || '');
+  const [roleTitle, setRoleTitle] = useState(profile.roleTitle || '');
+  const [rateOrBudget, setRateOrBudget] = useState(profile.rateOrBudget || '');
+  const [bio, setBio] = useState(profile.bio || '');
+  const [skillsStr, setSkillsStr] = useState((profile.skills || []).join(', '));
+
+  React.useEffect(() => {
+    setName(profile.name || '');
+    setRoleTitle(profile.roleTitle || '');
+    setRateOrBudget(profile.rateOrBudget || '');
+    setBio(profile.bio || '');
+    setSkillsStr((profile.skills || []).join(', '));
+  }, [profile]);
 
   const handleSave = () => {
     const updatedSkills = skillsStr

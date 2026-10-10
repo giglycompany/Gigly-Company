@@ -85,13 +85,7 @@ export default function App() {
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
 
   // Unread read-receipts tracking per match for current user
-  const [lastReadMessageIds, setLastReadMessageIds] = useState<Record<number, string>>(() => {
-    try {
-      const cached = localStorage.getItem('gigly_read_messages_guest-user');
-      if (cached) return JSON.parse(cached);
-    } catch {}
-    return {};
-  });
+  const [lastReadMessageIds, setLastReadMessageIds] = useState<Record<number, string>>({});
 
   // Active in-app notification toast when somebody texts back
   const [toastNotification, setToastNotification] = useState<{
@@ -102,34 +96,39 @@ export default function App() {
   } | null>(null);
 
   // Persistent Set of Swiped Profiles (Cards already reviewed)
-  const [swipedIds, setSwipedIds] = useState<Set<string>>(() => {
-    try {
-      const cached = localStorage.getItem('gigly_swiped_items_guest-user');
-      if (cached) return new Set(JSON.parse(cached));
-    } catch {}
-    return new Set();
-  });
+  const [swipedIds, setSwipedIds] = useState<Set<string>>(new Set());
 
-  // User Profile State with local persistence fallback
+  // User Profile State: clean unauthenticated default (NO assumption of user or email prior to login)
   const [profile, setProfile] = useState<UserProfile>(() => {
-    const defaultProfile: UserProfile = {
-      name: 'Yash S.',
+    const activeSession = getActiveUserSession();
+    if (activeSession && activeSession.uid) {
+      try {
+        const cached = localStorage.getItem(`gigly_profile_${activeSession.uid}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.profileCompleted) {
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return {
+      name: '',
       role: 'freelancer',
-      roleTitle: 'Product & Frontend Designer',
-      rateOrBudget: '$55–70 / hr',
-      bio: 'I design and build product interfaces end to end — from Figma flows to shipped React. I like short, well-scoped sprints over long open-ended retainers.',
-      skills: ['Figma', 'React', 'Design systems', 'UX writing'],
-      email: 'giglycompany@gmail.com',
-      avatarInitials: 'YS',
-      verified: true,
-      profileCompleted: true,
+      roleTitle: '',
+      rateOrBudget: '',
+      bio: '',
+      skills: [],
+      email: '',
+      avatarInitials: '',
+      verified: false,
+      profileCompleted: false,
       stats: {
-        appliedOrPosted: 18,
-        hired: 5,
-        ratingOrResponse: '96%',
+        appliedOrPosted: 0,
+        hired: 0,
+        ratingOrResponse: '100%',
       },
     };
-    return defaultProfile;
   });
 
   // Seed Firestore & Listen to Auth state and local sessions on initial load
@@ -249,6 +248,8 @@ export default function App() {
   // Subscribe to user-specific matches in Firestore
   useEffect(() => {
     if (!currentUserId || currentUserId === 'guest-user') {
+      setMatches([]);
+      setToastNotification(null);
       return;
     }
 
@@ -464,6 +465,27 @@ export default function App() {
     await logoutUser();
     setCurrentUserId('guest-user');
     setMatches([]);
+    setLastReadMessageIds({});
+    setToastNotification(null);
+    userBaselineLoadedRef.current = null;
+    prevMatchesRef.current = [];
+    setProfile({
+      name: '',
+      role: 'freelancer',
+      roleTitle: '',
+      rateOrBudget: '',
+      bio: '',
+      skills: [],
+      email: '',
+      avatarInitials: '',
+      verified: false,
+      profileCompleted: false,
+      stats: {
+        appliedOrPosted: 0,
+        hired: 0,
+        ratingOrResponse: '100%',
+      },
+    });
     setCurrentScreen('auth');
   };
 
@@ -656,36 +678,59 @@ export default function App() {
     return unread;
   };
 
-  // Calculate unread map per match and total unread texts
+  // Calculate unread map per match and total unread texts (ONLY for authenticated in-app sessions)
   const unreadCountByMatch = useMemo(() => {
+    if (!currentUserId || currentUserId === 'guest-user' || ['startup', 'auth', 'onboarding'].includes(currentScreen)) {
+      return {};
+    }
     const map: Record<number, number> = {};
     matches.forEach((m) => {
       map[m.id] = getMatchUnreadCount(m);
     });
     return map;
-  }, [matches, lastReadMessageIds, currentUserId]);
+  }, [matches, lastReadMessageIds, currentUserId, currentScreen]);
 
   const totalUnreadIncomingMessages = useMemo(() => {
+    if (!currentUserId || currentUserId === 'guest-user' || ['startup', 'auth', 'onboarding'].includes(currentScreen)) {
+      return 0;
+    }
     return Object.values(unreadCountByMatch).reduce((acc: number, count: number) => acc + count, 0);
-  }, [unreadCountByMatch]);
+  }, [unreadCountByMatch, currentUserId, currentScreen]);
 
-  // Real-time incoming text detection: Trigger toast notification & audio chime when someone texts back
+  // Real-time incoming text detection: Trigger toast notification & audio chime ONLY when logged in and somebody texts back
   const prevMatchesRef = useRef<MatchRecord[]>([]);
-  const isInitialMount = useRef(true);
+  const userBaselineLoadedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
+    // 🛑 STRICT GUARD: If user has NOT logged in or is on startup / login / onboarding screen,
+    // NEVER show notification toast, NEVER play chime, and clear any dangling notification
+    const isUserLoggedIn = Boolean(currentUserId && currentUserId !== 'guest-user');
+    const isInAppScreen = ['explore', 'matches', 'messages', 'profile'].includes(currentScreen);
+
+    if (!isUserLoggedIn || !isInAppScreen) {
+      if (toastNotification) {
+        setToastNotification(null);
+      }
       prevMatchesRef.current = matches;
       return;
     }
 
+    // Baseline establishment: when a user first logs in or session matches first load,
+    // establish the baseline WITHOUT assuming old existing messages are new incoming texts!
+    if (userBaselineLoadedRef.current !== currentUserId) {
+      userBaselineLoadedRef.current = currentUserId;
+      prevMatchesRef.current = matches;
+      return;
+    }
+
+    // Only compare for real new incoming messages after the baseline has been established
     matches.forEach((m) => {
       const prev = prevMatchesRef.current.find((p) => p.id === m.id);
       const prevCount = prev?.messages?.length || 0;
       const currentCount = m.messages?.length || 0;
 
-      if (currentCount > prevCount) {
+      // Only notify if this is an existing match that gained a new message
+      if (currentCount > prevCount && prev !== undefined) {
         const newMsgs = m.messages.slice(prevCount);
         const incomingMsgs = newMsgs.filter((msg) => {
           return msg.senderId ? msg.senderId !== currentUserId : msg.from === 'them';
@@ -923,23 +968,26 @@ export default function App() {
         </div>
       )}
 
-      {/* IN-APP FLOATING NOTIFICATION TOAST WHEN SOMEONE TEXTS BACK */}
+      {/* IN-APP FLOATING NOTIFICATION TOAST WHEN SOMEONE TEXTS BACK (STRICTLY IN-APP FOR LOGGED-IN USERS ONLY) */}
       <AnimatePresence>
-        {toastNotification && (
-          <NotificationToast
-            key={toastNotification.id}
-            matchId={toastNotification.matchId}
-            senderName={toastNotification.senderName}
-            text={toastNotification.text}
-            onOpen={() => {
-              setActiveChatId(toastNotification.matchId);
-              markChatAsRead(toastNotification.matchId);
-              setCurrentScreen('messages');
-              setToastNotification(null);
-            }}
-            onDismiss={() => setToastNotification(null)}
-          />
-        )}
+        {['explore', 'matches', 'messages', 'profile'].includes(currentScreen) &&
+          currentUserId &&
+          currentUserId !== 'guest-user' &&
+          toastNotification && (
+            <NotificationToast
+              key={toastNotification.id}
+              matchId={toastNotification.matchId}
+              senderName={toastNotification.senderName}
+              text={toastNotification.text}
+              onOpen={() => {
+                setActiveChatId(toastNotification.matchId);
+                markChatAsRead(toastNotification.matchId);
+                setCurrentScreen('messages');
+                setToastNotification(null);
+              }}
+              onDismiss={() => setToastNotification(null)}
+            />
+          )}
       </AnimatePresence>
 
       {/* MATCH POPUP OVERLAY */}
