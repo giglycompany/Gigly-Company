@@ -38,6 +38,7 @@ import { ProfileScreen } from './components/ProfileScreen';
 import { AdminDashboard } from './components/AdminDashboard';
 import { Navbar } from './components/Navbar';
 import { NotificationToast } from './components/NotificationToast';
+import { formatWithCurrency, CurrencyInfo } from './lib/currency';
 
 function playNotificationChime() {
   try {
@@ -97,6 +98,33 @@ export default function App() {
 
   // Persistent Set of Swiped Profiles (Cards already reviewed)
   const [swipedIds, setSwipedIds] = useState<Set<string>>(new Set());
+
+  // Global Currency Preference (Dollar $, Euro €, Rupee ₹, Pound £, Yen ¥, CAD C$, AUD A$)
+  const [currency, setCurrency] = useState<string>(() => {
+    try {
+      return localStorage.getItem('gigly_currency') || '$';
+    } catch {
+      return '$';
+    }
+  });
+
+  const handleCurrencyChange = (curr: CurrencyInfo) => {
+    setCurrency(curr.symbol);
+    try {
+      localStorage.setItem('gigly_currency', curr.symbol);
+    } catch {}
+    setProfile((prev) => {
+      if (!prev.rateOrBudget) return prev;
+      const updatedRate = formatWithCurrency(prev.rateOrBudget, curr.symbol);
+      const updated = { ...prev, rateOrBudget: updatedRate };
+      if (currentUserId && currentUserId !== 'guest-user') {
+        try {
+          localStorage.setItem(`gigly_profile_${currentUserId}`, JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+  };
 
   // User Profile State: clean unauthenticated default (NO assumption of user or email prior to login)
   const [profile, setProfile] = useState<UserProfile>(() => {
@@ -819,6 +847,8 @@ export default function App() {
         <OnboardingProfileScreen
           userEmail={profile.email || auth.currentUser?.email || ''}
           initialName={profile.name}
+          defaultCurrency={currency}
+          onCurrencyChange={handleCurrencyChange}
           onSaveProfile={handleCompleteOnboarding}
           onGoToAdmin={() => {
             sessionStorage.setItem('gigly_admin_session', 'true');
@@ -842,6 +872,8 @@ export default function App() {
           currentProfile={profile}
           jobs={jobs}
           candidates={candidates}
+          currency={currency}
+          onCurrencyChange={handleCurrencyChange}
         />
       )}
 
@@ -862,6 +894,8 @@ export default function App() {
                   role={userRole}
                   matchesCount={matches.length}
                   swipedIds={swipedIds}
+                  currency={currency}
+                  onCurrencyChange={handleCurrencyChange}
                   onSwipe={handleSwipe}
                   onReshuffle={() => {}}
                 />
@@ -879,6 +913,8 @@ export default function App() {
                 <MatchesScreen
                   matches={matches}
                   role={userRole}
+                  currency={currency}
+                  onCurrencyChange={handleCurrencyChange}
                   onOpenChat={(id) => {
                     const targetMatch = matches.find((m) => m.id === id);
                     if (
@@ -909,6 +945,8 @@ export default function App() {
                   role={userRole}
                   activeChatId={activeChatId}
                   currentUserId={currentUserId}
+                  currency={currency}
+                  onCurrencyChange={handleCurrencyChange}
                   unreadCountByMatch={unreadCountByMatch}
                   onSelectChat={(id) => {
                     setActiveChatId(id);
@@ -932,6 +970,8 @@ export default function App() {
               >
                 <ProfileScreen
                   profile={profile}
+                  currentCurrency={currency}
+                  onCurrencyChange={handleCurrencyChange}
                   onUpdateProfile={handleUpdateProfile}
                   onLogout={handleLogout}
                   onOpenAdmin={() => {

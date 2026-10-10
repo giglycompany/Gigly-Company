@@ -4,12 +4,16 @@ import { X, Star, Heart, RotateCcw, Sparkles, Filter, Check, ChevronDown, Briefc
 import { GigItem, GigCategory, GIG_CATEGORIES } from '../types';
 import { GiglyLogo } from './GiglyLogo';
 import { SuperlikeAnimation } from './SuperlikeAnimation';
+import { CurrencyDropdown } from './CurrencyDropdown';
+import { CurrencyInfo, formatWithCurrency } from '../lib/currency';
 
 interface ExploreDeckProps {
   items: GigItem[];
   role: 'freelancer' | 'business';
   matchesCount: number;
   swipedIds?: Set<string>;
+  currency?: string;
+  onCurrencyChange?: (curr: CurrencyInfo) => void;
   onSwipe: (item: GigItem, direction: 'left' | 'right' | 'up') => void;
   onReshuffle: () => void;
 }
@@ -28,6 +32,8 @@ export function ExploreDeck({
   role,
   matchesCount,
   swipedIds: externalSwipedIds,
+  currency = '$',
+  onCurrencyChange,
   onSwipe,
   onReshuffle,
 }: ExploreDeckProps) {
@@ -278,14 +284,24 @@ export function ExploreDeck({
             />
           </button>
 
-          {selectedCategory !== 'All' && (
-            <button
-              onClick={() => setSelectedCategory('All')}
-              className="text-[11px] font-bold text-[#6E6E6E] hover:text-black underline underline-offset-2 cursor-pointer transition-colors"
-            >
-              Show All ({categoryCounts['All'] || 0})
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {selectedCategory !== 'All' && (
+              <button
+                onClick={() => setSelectedCategory('All')}
+                className="text-[11px] font-bold text-[#6E6E6E] hover:text-black underline underline-offset-2 cursor-pointer transition-colors"
+              >
+                Show All ({categoryCounts['All'] || 0})
+              </button>
+            )}
+
+            {onCurrencyChange && (
+              <CurrencyDropdown
+                value={currency}
+                onChange={onCurrencyChange}
+                size="xs"
+              />
+            )}
+          </div>
 
           {/* POPUP DROPDOWN MENU WITH ALL 13 WORKS */}
           <AnimatePresence>
@@ -478,6 +494,8 @@ export function ExploreDeck({
                 index={index}
                 isTop={isTop}
                 flyUp={job.id === flyUpId}
+                currency={currency}
+                onCurrencyChange={onCurrencyChange}
                 onSwipe={(dir) => handleCardSwipe(dir)}
               />
             );
@@ -541,10 +559,20 @@ interface SwipeCardProps {
   index: number;
   isTop: boolean;
   flyUp?: boolean;
+  currency?: string;
+  onCurrencyChange?: (curr: CurrencyInfo) => void;
   onSwipe: (dir: 'left' | 'right') => void;
 }
 
-function SwipeCard({ job, index, isTop, flyUp = false, onSwipe }: SwipeCardProps) {
+function SwipeCard({
+  job,
+  index,
+  isTop,
+  flyUp = false,
+  currency = '$',
+  onCurrencyChange,
+  onSwipe,
+}: SwipeCardProps) {
   const x = useMotionValue(0);
 
   const rotate = useTransform(x, [-200, 200], [-18, 18]);
@@ -618,13 +646,27 @@ function SwipeCard({ job, index, isTop, flyUp = false, onSwipe }: SwipeCardProps
       {/* Card Content Top */}
       <div>
         <div className="flex items-start justify-between mb-2.5">
-          <div>
+          <div className="flex items-center gap-2">
             <div className="font-display font-[800] text-[28px] sm:text-[30px] text-black leading-none">
-              {job.rate}
+              {formatWithCurrency(job.rate, currency)}
               <span className="text-[13px] font-semibold text-[#6E6E6E] ml-1 font-body">
                 {job.unit}
               </span>
             </div>
+            {isTop && onCurrencyChange && (
+              <div
+                className="pointer-events-auto"
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <CurrencyDropdown
+                  value={currency}
+                  onChange={onCurrencyChange}
+                  size="xs"
+                />
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-1.5">
             {/* Category Pill Tag */}

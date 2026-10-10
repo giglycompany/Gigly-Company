@@ -2,16 +2,34 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { UserProfile, isAdminEmail } from '../types';
 import { Check, Edit3, ShieldCheck, Star, LogOut, Mail, Tag, Shield } from 'lucide-react';
+import { CurrencyDropdown } from './CurrencyDropdown';
+import { CurrencyInfo, formatWithCurrency, updateInputWithCurrency } from '../lib/currency';
 
 interface ProfileScreenProps {
   profile: UserProfile;
+  currentCurrency?: string;
   onUpdateProfile: (updated: Partial<UserProfile>) => void;
   onLogout?: () => void;
   onOpenAdmin?: () => void;
+  onCurrencyChange?: (curr: CurrencyInfo) => void;
 }
 
-export function ProfileScreen({ profile, onUpdateProfile, onLogout, onOpenAdmin }: ProfileScreenProps) {
+export function ProfileScreen({
+  profile,
+  currentCurrency = '$',
+  onUpdateProfile,
+  onLogout,
+  onOpenAdmin,
+  onCurrencyChange,
+}: ProfileScreenProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [selectedCurrency, setSelectedCurrency] = useState<string>(() => {
+    try {
+      return localStorage.getItem('gigly_currency') || currentCurrency || '$';
+    } catch {
+      return currentCurrency || '$';
+    }
+  });
 
   // Form states
   const [name, setName] = useState(profile.name || '');
@@ -27,6 +45,23 @@ export function ProfileScreen({ profile, onUpdateProfile, onLogout, onOpenAdmin 
     setBio(profile.bio || '');
     setSkillsStr((profile.skills || []).join(', '));
   }, [profile]);
+
+  const handleCurrencyChange = (curr: CurrencyInfo) => {
+    setSelectedCurrency(curr.symbol);
+    try {
+      localStorage.setItem('gigly_currency', curr.symbol);
+    } catch {}
+    if (onCurrencyChange) {
+      onCurrencyChange(curr);
+    }
+    const updatedRate = updateInputWithCurrency(rateOrBudget, curr.symbol, profile.role);
+    setRateOrBudget(updatedRate);
+    if (!isEditing) {
+      onUpdateProfile({
+        rateOrBudget: formatWithCurrency(profile.rateOrBudget, curr.symbol),
+      });
+    }
+  };
 
   const handleSave = () => {
     const updatedSkills = skillsStr
@@ -123,10 +158,19 @@ export function ProfileScreen({ profile, onUpdateProfile, onLogout, onOpenAdmin 
         {!isEditing ? (
           <div className="space-y-4 pt-2">
             <div>
-              <span className="block text-[11px] font-bold uppercase tracking-wider text-[#6E6E6E] mb-1">
-                {profile.role === 'freelancer' ? 'Rate' : 'Typical Budget'}
-              </span>
-              <p className="text-[14px] font-semibold text-black">{profile.rateOrBudget}</p>
+              <div className="flex items-center justify-between mb-1">
+                <span className="block text-[11px] font-bold uppercase tracking-wider text-[#6E6E6E]">
+                  {profile.role === 'freelancer' ? 'Rate' : 'Typical Budget'}
+                </span>
+                <CurrencyDropdown
+                  value={selectedCurrency}
+                  onChange={handleCurrencyChange}
+                  size="xs"
+                />
+              </div>
+              <p className="text-[14px] font-semibold text-black">
+                {formatWithCurrency(profile.rateOrBudget, selectedCurrency)}
+              </p>
             </div>
 
             <div>
@@ -190,15 +234,28 @@ export function ProfileScreen({ profile, onUpdateProfile, onLogout, onOpenAdmin 
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-[#6E6E6E] mb-1">
-                {profile.role === 'freelancer' ? 'Rate' : 'Typical Budget'}
-              </label>
-              <input
-                type="text"
-                value={rateOrBudget}
-                onChange={(e) => setRateOrBudget(e.target.value)}
-                className="w-full px-3.5 py-2 bg-[#FFFCF5] border-[2px] border-black rounded-xl text-[13.5px] font-semibold focus:outline-none focus:ring-2 focus:ring-[#FFC629]"
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-[#6E6E6E]">
+                  {profile.role === 'freelancer' ? 'Rate' : 'Typical Budget'}
+                </label>
+                <CurrencyDropdown
+                  value={selectedCurrency}
+                  onChange={handleCurrencyChange}
+                  size="xs"
+                />
+              </div>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={rateOrBudget}
+                  onChange={(e) => setRateOrBudget(e.target.value)}
+                  placeholder={`${selectedCurrency}60 / hr`}
+                  className="w-full pl-10 pr-3.5 py-2 bg-[#FFFCF5] border-[2px] border-black rounded-xl text-[13.5px] font-semibold focus:outline-none focus:ring-2 focus:ring-[#FFC629]"
+                />
+                <div className="absolute left-3 top-2.5 font-display font-[800] text-[13.5px] text-black w-5 text-center select-none pointer-events-none">
+                  {selectedCurrency}
+                </div>
+              </div>
             </div>
 
             <div>

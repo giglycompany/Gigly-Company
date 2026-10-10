@@ -14,12 +14,16 @@ import {
 } from 'lucide-react';
 import { GigCategory, GIG_CATEGORIES, UserProfile, isAdminEmail } from '../types';
 import { GiglyLogo } from './GiglyLogo';
+import { CurrencyDropdown } from './CurrencyDropdown';
+import { CurrencyInfo, updateInputWithCurrency } from '../lib/currency';
 
 interface OnboardingProfileScreenProps {
   userEmail: string;
   initialName?: string;
+  defaultCurrency?: string;
   onSaveProfile: (profile: UserProfile) => Promise<void> | void;
   onGoToAdmin?: () => void;
+  onCurrencyChange?: (curr: CurrencyInfo) => void;
 }
 
 const POPULAR_SKILLS = [
@@ -40,8 +44,10 @@ const POPULAR_SKILLS = [
 export function OnboardingProfileScreen({
   userEmail,
   initialName = '',
+  defaultCurrency = '$',
   onSaveProfile,
   onGoToAdmin,
+  onCurrencyChange,
 }: OnboardingProfileScreenProps) {
   const [role, setRole] = useState<'freelancer' | 'business'>('freelancer');
   const [name, setName] = useState(initialName || (userEmail ? userEmail.split('@')[0] : ''));
@@ -49,8 +55,15 @@ export function OnboardingProfileScreen({
   const [roleTitle, setRoleTitle] = useState(
     role === 'freelancer' ? 'Product & UI/UX Designer' : 'Design & Tech Studio'
   );
+  const [selectedCurrency, setSelectedCurrency] = useState<string>(() => {
+    try {
+      return localStorage.getItem('gigly_currency') || defaultCurrency || '$';
+    } catch {
+      return defaultCurrency || '$';
+    }
+  });
   const [rateOrBudget, setRateOrBudget] = useState(
-    role === 'freelancer' ? '$55–75 / hr' : '$1,000–3,000 / project'
+    role === 'freelancer' ? `${selectedCurrency}55–75 / hr` : `${selectedCurrency}1,000–3,000 / project`
   );
   const [bio, setBio] = useState('');
   const [skills, setSkills] = useState<string[]>(['Figma', 'UI/UX']);
@@ -65,15 +78,27 @@ export function OnboardingProfileScreen({
     }
   }, [userEmail, onGoToAdmin]);
 
+  // Handle currency changes from dropdown
+  const handleCurrencyChange = (curr: CurrencyInfo) => {
+    setSelectedCurrency(curr.symbol);
+    try {
+      localStorage.setItem('gigly_currency', curr.symbol);
+    } catch {}
+    if (onCurrencyChange) {
+      onCurrencyChange(curr);
+    }
+    setRateOrBudget((prev) => updateInputWithCurrency(prev, curr.symbol, role));
+  };
+
   // When switching role, adjust default title and rate placeholder if user hasn't heavily customized
   const handleRoleChange = (newRole: 'freelancer' | 'business') => {
     setRole(newRole);
     if (newRole === 'freelancer') {
       setRoleTitle('Product & UI/UX Designer');
-      setRateOrBudget('$55–75 / hr');
+      setRateOrBudget(`${selectedCurrency}55–75 / hr`);
     } else {
       setRoleTitle('Design & Tech Studio');
-      setRateOrBudget('$1,000–3,000 / project');
+      setRateOrBudget(`${selectedCurrency}1,000–3,000 / project`);
     }
   };
 
@@ -330,23 +355,42 @@ export function OnboardingProfileScreen({
           </select>
         </div>
 
-        {/* 5. Rate / Budget */}
+        {/* 5. Rate / Budget with Currency Switcher Dropdown */}
         <div>
-          <label className="block text-[12px] font-extrabold uppercase text-black mb-1.5">
-            5. {role === 'freelancer' ? 'Hourly / Project Rate' : 'Typical Project Budget'}{' '}
-            <span className="text-red-500">*</span>
-          </label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-black flex items-center gap-1">
+              <span>5. {role === 'freelancer' ? 'Hourly / Project Rate' : 'Typical Project Budget'}</span>
+              <span className="text-red-500">*</span>
+            </label>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10.5px] font-bold text-[#6E6E6E] uppercase">Currency:</span>
+              <CurrencyDropdown
+                value={selectedCurrency}
+                onChange={handleCurrencyChange}
+                size="xs"
+              />
+            </div>
+          </div>
           <div className="relative">
             <input
               type="text"
               required
               value={rateOrBudget}
               onChange={(e) => setRateOrBudget(e.target.value)}
-              placeholder={role === 'freelancer' ? '$60 / hr' : '$1,500–5,000 / project'}
-              className="w-full pl-10 pr-4 py-3 bg-white border-[2.5px] border-black rounded-xl text-[14px] font-semibold text-black focus:outline-none focus:ring-2 focus:ring-[#FFC629] shadow-[2px_2px_0px_0px_#000]"
+              placeholder={
+                role === 'freelancer'
+                  ? `${selectedCurrency}60 / hr`
+                  : `${selectedCurrency}1,500–5,000 / project`
+              }
+              className="w-full pl-12 pr-4 py-3 bg-white border-[2.5px] border-black rounded-xl text-[14px] font-semibold text-black focus:outline-none focus:ring-2 focus:ring-[#FFC629] shadow-[2px_2px_0px_0px_#000]"
             />
-            <DollarSign className="w-5 h-5 text-black absolute left-3 top-3.5" />
+            <div className="absolute left-3 top-3 flex items-center justify-center font-display font-[800] text-[15px] text-black w-6 text-center select-none pointer-events-none">
+              {selectedCurrency}
+            </div>
           </div>
+          <p className="text-[11px] font-medium text-[#6E6E6E] mt-1">
+            Switch currency anytime (Dollar $, Euro €, Rupee ₹, Pound £, Yen ¥, CAD C$, AUD A$).
+          </p>
         </div>
 
         {/* 6. Bio / Description */}

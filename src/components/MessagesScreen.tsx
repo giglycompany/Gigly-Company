@@ -15,6 +15,8 @@ import {
   MessageSquare,
   Lock,
 } from 'lucide-react';
+import { CurrencyDropdown } from './CurrencyDropdown';
+import { CurrencyInfo, formatWithCurrency } from '../lib/currency';
 import {
   FREELANCER_SUGGESTIONS,
   BUSINESS_SUGGESTIONS,
@@ -25,6 +27,8 @@ interface MessagesScreenProps {
   role: 'freelancer' | 'business';
   activeChatId: number | null;
   currentUserId?: string;
+  currency?: string;
+  onCurrencyChange?: (curr: CurrencyInfo) => void;
   unreadCountByMatch?: Record<number, number>;
   onSelectChat: (id: number | null) => void;
   onSendMessage: (matchId: number, text: string) => void;
@@ -45,6 +49,8 @@ export function MessagesScreen({
   role,
   activeChatId,
   currentUserId,
+  currency = '$',
+  onCurrencyChange,
   unreadCountByMatch,
   onSelectChat,
   onSendMessage,
@@ -289,12 +295,21 @@ export function MessagesScreen({
                     <span className="text-[10.5px] font-extrabold uppercase text-[#777] block">
                       {role === 'business' ? 'Hourly / Project Rate' : 'Estimated Budget'}
                     </span>
-                    <span className="font-display font-[800] text-[20px] text-black">
-                      {viewingProfile.rate}
-                      <span className="text-[12px] font-bold text-[#555] ml-1">
-                        {viewingProfile.unit}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="font-display font-[800] text-[20px] text-black">
+                        {formatWithCurrency(viewingProfile.rate, currency)}
+                        <span className="text-[12px] font-bold text-[#555] ml-1">
+                          {viewingProfile.unit}
+                        </span>
                       </span>
-                    </span>
+                      {onCurrencyChange && (
+                        <CurrencyDropdown
+                          value={currency}
+                          onChange={onCurrencyChange}
+                          size="xs"
+                        />
+                      )}
+                    </div>
                   </div>
                   <div className="text-right">
                     <span className="text-[10.5px] font-extrabold uppercase text-[#777] block">
@@ -375,8 +390,17 @@ export function MessagesScreen({
   return (
     <div className="w-full flex flex-col">
       <header className="w-full mb-4">
-        <div className="font-display font-[800] text-[26px] text-black tracking-tight flex items-center gap-1.5 mb-2">
-          Gigly <span className="w-2.5 h-2.5 rounded-full bg-[#FFC629] border-[2px] border-black inline-block" />
+        <div className="flex items-center justify-between mb-2">
+          <div className="font-display font-[800] text-[26px] text-black tracking-tight flex items-center gap-1.5">
+            Gigly <span className="w-2.5 h-2.5 rounded-full bg-[#FFC629] border-[2px] border-black inline-block" />
+          </div>
+          {onCurrencyChange && (
+            <CurrencyDropdown
+              value={currency}
+              onChange={onCurrencyChange}
+              size="xs"
+            />
+          )}
         </div>
         <div className="flex items-center justify-between">
           <h2 className="font-display font-[800] text-[24px] text-black">Messages</h2>
