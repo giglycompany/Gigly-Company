@@ -25,8 +25,10 @@ interface MessagesScreenProps {
   role: 'freelancer' | 'business';
   activeChatId: number | null;
   currentUserId?: string;
+  unreadCountByMatch?: Record<number, number>;
   onSelectChat: (id: number | null) => void;
   onSendMessage: (matchId: number, text: string) => void;
+  onSimulateIncomingText?: (matchId: number, text?: string) => void;
 }
 
 function getInitials(name: string): string {
@@ -43,8 +45,10 @@ export function MessagesScreen({
   role,
   activeChatId,
   currentUserId,
+  unreadCountByMatch,
   onSelectChat,
   onSendMessage,
+  onSimulateIncomingText,
 }: MessagesScreenProps) {
   const [inputText, setInputText] = useState('');
   const [viewingProfile, setViewingProfile] = useState<GigItem | null>(null);
@@ -130,6 +134,19 @@ export function MessagesScreen({
               </p>
             </div>
           </button>
+
+          {/* Optional Test Reply Button to test incoming notifications */}
+          {onSimulateIncomingText && (
+            <button
+              type="button"
+              onClick={() => onSimulateIncomingText(activeMatch.id)}
+              className="px-2 py-1 bg-[#FFF9E6] hover:bg-[#FFC629] border-[1.5px] border-black rounded-lg text-[10.5px] font-black text-black flex items-center gap-1 shadow-[1px_1px_0px_0px_#000] cursor-pointer flex-shrink-0 transition-colors"
+              title="Test: Simulate a text back from this person to test notifications"
+            >
+              <Sparkles className="w-3 h-3 text-amber-600" />
+              <span>Test reply</span>
+            </button>
+          )}
         </div>
 
         {/* Messages Body */}
@@ -345,18 +362,56 @@ export function MessagesScreen({
   }
 
   // 2. Chat Overview List
+  const sortedMatches = [...matches].sort((a, b) => {
+    const unreadA = unreadCountByMatch?.[a.id] || 0;
+    const unreadB = unreadCountByMatch?.[b.id] || 0;
+    if (unreadA > 0 && unreadB === 0) return -1;
+    if (unreadB > 0 && unreadA === 0) return 1;
+    return b.id - a.id;
+  });
+
+  const totalUnreadCount = Object.values(unreadCountByMatch || {}).reduce((acc, c) => acc + c, 0);
+
   return (
     <div className="w-full flex flex-col">
       <header className="w-full mb-4">
         <div className="font-display font-[800] text-[26px] text-black tracking-tight flex items-center gap-1.5 mb-2">
           Gigly <span className="w-2.5 h-2.5 rounded-full bg-[#FFC629] border-[2px] border-black inline-block" />
         </div>
-        <h2 className="font-display font-[800] text-[24px] text-black">Messages</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-display font-[800] text-[24px] text-black">Messages</h2>
+          {totalUnreadCount > 0 && (
+            <span className="px-2.5 py-1 rounded-full bg-[#FFC629] border-[2px] border-black text-black font-display font-black text-[11px] shadow-[1.5px_1.5px_0px_0px_#000] flex items-center gap-1.5 animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-emerald-600 inline-block" />
+              {totalUnreadCount === 1 ? '1 new reply' : `${totalUnreadCount} new replies`}
+            </span>
+          )}
+        </div>
         <p className="text-[13px] font-semibold text-[#6E6E6E]">
           {role === 'freelancer'
             ? "Chat with clients you've matched with."
             : "Chat with freelancers you've matched with."}
         </p>
+
+        {totalUnreadCount > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-3 p-2.5 px-3.5 bg-[#FFF9E6] border-[2px] border-black rounded-2xl flex items-center justify-between shadow-[2px_2px_0px_0px_#000]"
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-full bg-[#FFC629] border-[1.5px] border-black flex items-center justify-center flex-shrink-0">
+                <MessageSquare className="w-3.5 h-3.5 text-black stroke-[2.5]" />
+              </div>
+              <span className="text-[12px] font-bold text-black">
+                {totalUnreadCount === 1 ? 'You have 1 new reply waiting' : `You have ${totalUnreadCount} new replies waiting`}
+              </span>
+            </div>
+            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 bg-black text-[#FFC629] rounded-full">
+              Unread
+            </span>
+          </motion.div>
+        )}
       </header>
 
       {matches.length === 0 ? (
@@ -373,14 +428,20 @@ export function MessagesScreen({
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {matches.map((m) => {
+          {sortedMatches.map((m) => {
             const hasResponded = m.messages && m.messages.length > 0;
             const isWindowClosed = !hasResponded && m.expiresAt <= Date.now();
             const lastMessage = m.messages[m.messages.length - 1];
+            const isLastFromMe = lastMessage
+              ? (lastMessage.senderId ? lastMessage.senderId === currentUserId : lastMessage.from === 'me')
+              : false;
+            const unreadCount = unreadCountByMatch?.[m.id] || 0;
+            const hasUnread = unreadCount > 0;
+
             const preview = isWindowClosed
               ? 'Pitch window closed (24h expired)'
               : lastMessage
-              ? `${lastMessage.from === 'me' ? 'You: ' : ''}${lastMessage.text}`
+              ? `${isLastFromMe ? 'You: ' : ''}${lastMessage.text}`
               : `Say hi to ${m.job.client} 👋`;
 
             return (
@@ -390,27 +451,37 @@ export function MessagesScreen({
                 whileHover={!isWindowClosed ? { scale: 1.01, y: -1 } : undefined}
                 whileTap={!isWindowClosed ? { scale: 0.99 } : undefined}
                 onClick={() => !isWindowClosed && onSelectChat(m.id)}
-                className={`flex items-center gap-3.5 border-[2.5px] rounded-[20px] p-3.5 text-left transition-all select-none ${
+                className={`flex items-center gap-3.5 border-[2.5px] rounded-[20px] p-3.5 text-left transition-all select-none relative ${
                   isWindowClosed
                     ? 'bg-gray-100 border-gray-300 opacity-60 cursor-not-allowed shadow-none'
+                    : hasUnread
+                    ? 'bg-[#FFFDF0] border-black shadow-[5px_6px_0px_0px_#000] ring-[2.5px] ring-[#FFC629]'
                     : 'bg-white border-black shadow-[4px_5px_0px_0px_#000] cursor-pointer hover:shadow-[5px_6px_0px_0px_#000]'
                 }`}
               >
-                <div
-                  className={`w-12 h-12 rounded-full border-[2.5px] flex items-center justify-center font-display font-[800] text-[14px] flex-shrink-0 ${
-                    isWindowClosed
-                      ? 'bg-gray-200 border-gray-400 text-gray-400'
-                      : 'bg-[#FFC629] border-black text-black'
-                  }`}
-                >
-                  {isWindowClosed ? (
-                    <Lock className="w-5 h-5 text-gray-400" />
-                  ) : (
-                    getInitials(m.job.client)
+                <div className="relative flex-shrink-0">
+                  <div
+                    className={`w-12 h-12 rounded-full border-[2.5px] flex items-center justify-center font-display font-[800] text-[14px] flex-shrink-0 ${
+                      isWindowClosed
+                        ? 'bg-gray-200 border-gray-400 text-gray-400'
+                        : hasUnread
+                        ? 'bg-[#FFC629] border-black text-black shadow-[1.5px_1.5px_0px_0px_#000]'
+                        : 'bg-[#FFC629] border-black text-black'
+                    }`}
+                  >
+                    {isWindowClosed ? (
+                      <Lock className="w-5 h-5 text-gray-400" />
+                    ) : (
+                      getInitials(m.job.client)
+                    )}
+                  </div>
+                  {hasUnread && (
+                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-black rounded-full shadow-[0.5px_0.5px_0px_0px_#000]" />
                   )}
                 </div>
+
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-1.5">
                     <h4
                       className={`font-display font-bold text-[14.5px] truncate ${
                         isWindowClosed ? 'text-gray-500' : 'text-black'
@@ -422,17 +493,40 @@ export function MessagesScreen({
                       <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-500 text-[10px] font-extrabold border border-gray-300">
                         Closed
                       </span>
+                    ) : hasUnread ? (
+                      <span className="px-2 py-0.5 rounded-full bg-[#FFC629] border-[1.5px] border-black text-black text-[10px] font-black shadow-[1px_1px_0px_0px_#000] flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block animate-ping" />
+                        {unreadCount > 1 ? `${unreadCount} new` : 'New reply'}
+                      </span>
                     ) : m.messages.length === 0 ? (
                       <span className="w-2.5 h-2.5 rounded-full bg-[#FFC629] border-[1.5px] border-black" />
                     ) : null}
                   </div>
-                  <p
-                    className={`text-[12px] font-medium truncate mt-0.5 ${
-                      isWindowClosed ? 'text-gray-400 italic' : 'text-[#6E6E6E]'
-                    }`}
-                  >
-                    {preview}
-                  </p>
+                  <div className="flex items-center justify-between mt-0.5 gap-2">
+                    <p
+                      className={`text-[12px] truncate flex-1 ${
+                        isWindowClosed
+                          ? 'text-gray-400 italic'
+                          : hasUnread
+                          ? 'font-bold text-black'
+                          : 'font-medium text-[#6E6E6E]'
+                      }`}
+                    >
+                      {hasUnread && !isLastFromMe ? (
+                        <span className="text-black font-extrabold mr-1">Reply:</span>
+                      ) : null}
+                      {preview}
+                    </p>
+                    {lastMessage?.timestamp && !isWindowClosed && (
+                      <span
+                        className={`text-[10px] font-bold flex-shrink-0 ${
+                          hasUnread ? 'text-black font-extrabold' : 'text-[#8E8E8E]'
+                        }`}
+                      >
+                        {lastMessage.timestamp}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </motion.button>
             );

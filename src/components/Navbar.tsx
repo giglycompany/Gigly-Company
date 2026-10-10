@@ -73,18 +73,25 @@ export function Navbar({
                   }`}
                 />
                 {!!tab.badge && tab.badge > 0 && (
-                  <span className="absolute -top-1.5 -right-2.5 min-w-[17px] h-[17px] px-1 rounded-full bg-[#FFC629] border-[1.5px] border-black text-black font-display font-extrabold text-[9.5px] flex items-center justify-center shadow-[1px_1px_0px_0px_#000]">
+                  <span
+                    className={`absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#FFC629] border-[1.5px] border-black text-black font-display font-black text-[10px] flex items-center justify-center shadow-[1.5px_1.5px_0px_0px_#000] ${
+                      tab.id === 'messages' ? 'animate-bounce' : ''
+                    }`}
+                  >
                     {tab.badge}
                   </span>
                 )}
               </div>
 
               <span
-                className={`font-display text-[11px] mt-1 transition-colors ${
+                className={`font-display text-[11px] mt-1 transition-colors flex items-center gap-1 ${
                   isActive ? 'font-extrabold text-black' : 'font-semibold text-[#8E8E8E]'
                 }`}
               >
                 {tab.label}
+                {tab.id === 'messages' && !!tab.badge && tab.badge > 0 && !isActive && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#FFC629] border border-black inline-block" />
+                )}
               </span>
 
               {/* Active Indicator Dot */}

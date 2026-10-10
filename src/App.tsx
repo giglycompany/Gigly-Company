@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AppScreen,
   GigItem,
   MatchRecord,
   UserProfile,
+  ChatMessage,
   isAdminEmail,
   ADMIN_EMAIL,
 } from './types';
@@ -36,6 +37,35 @@ import { MessagesScreen } from './components/MessagesScreen';
 import { ProfileScreen } from './components/ProfileScreen';
 import { AdminDashboard } from './components/AdminDashboard';
 import { Navbar } from './components/Navbar';
+import { NotificationToast } from './components/NotificationToast';
+
+function playNotificationChime() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880, ctx.currentTime + 0.08); // A5
+
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc1.start(ctx.currentTime);
+    osc1.stop(ctx.currentTime + 0.1);
+    osc2.start(ctx.currentTime + 0.08);
+    osc2.stop(ctx.currentTime + 0.3);
+  } catch {}
+}
 
 export default function App() {
   // App Navigation State
@@ -53,6 +83,23 @@ export default function App() {
   const [matchedOverlayJob, setMatchedOverlayJob] = useState<GigItem | null>(null);
   const [isSuperLikeMatch, setIsSuperLikeMatch] = useState(false);
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
+
+  // Unread read-receipts tracking per match for current user
+  const [lastReadMessageIds, setLastReadMessageIds] = useState<Record<number, string>>(() => {
+    try {
+      const cached = localStorage.getItem('gigly_read_messages_guest-user');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return {};
+  });
+
+  // Active in-app notification toast when somebody texts back
+  const [toastNotification, setToastNotification] = useState<{
+    id: string;
+    matchId: number;
+    senderName: string;
+    text: string;
+  } | null>(null);
 
   // Persistent Set of Swiped Profiles (Cards already reviewed)
   const [swipedIds, setSwipedIds] = useState<Set<string>>(() => {
@@ -221,6 +268,36 @@ export default function App() {
     });
 
     return () => unsubMatches();
+  }, [currentUserId]);
+
+  // Load and sync read messages status for current user & cross-tab events
+  useEffect(() => {
+    if (currentUserId) {
+      try {
+        const stored = localStorage.getItem(`gigly_read_messages_${currentUserId}`);
+        if (stored) {
+          setLastReadMessageIds(JSON.parse(stored));
+        } else {
+          setLastReadMessageIds({});
+        }
+      } catch {}
+    }
+
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (e.key === `gigly_matches_${currentUserId}` && e.newValue) {
+        try {
+          setMatches(JSON.parse(e.newValue));
+        } catch {}
+      }
+      if (e.key === `gigly_read_messages_${currentUserId}` && e.newValue) {
+        try {
+          setLastReadMessageIds(JSON.parse(e.newValue));
+        } catch {}
+      }
+    };
+
+    window.addEventListener('storage', handleStorageEvent);
+    return () => window.removeEventListener('storage', handleStorageEvent);
   }, [currentUserId]);
 
   // Load and sync reviewed/swiped card IDs whenever current user changes
@@ -458,16 +535,39 @@ export default function App() {
     }
   };
 
+  // Mark a conversation as read by recording the latest message id
+  const markChatAsRead = (matchId: number) => {
+    const targetMatch = matches.find((m) => m.id === matchId);
+    if (!targetMatch || !targetMatch.messages || targetMatch.messages.length === 0) return;
+    const latestMsg = targetMatch.messages[targetMatch.messages.length - 1];
+    setLastReadMessageIds((prev) => {
+      if (prev[matchId] === latestMsg.id) return prev;
+      const updated = { ...prev, [matchId]: latestMsg.id };
+      try {
+        localStorage.setItem(`gigly_read_messages_${currentUserId}`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  // Automatically mark active chat as read whenever user is viewing it
+  useEffect(() => {
+    if (currentScreen === 'messages' && activeChatId !== null) {
+      markChatAsRead(activeChatId);
+    }
+  }, [currentScreen, activeChatId, matches]);
+
   // Send Message in Chat (sync to Firestore for real users)
   const handleSendMessage = (matchId: number, text: string) => {
     const cleanText = text.trim();
     if (!cleanText) return;
 
+    const newMsgId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     setMatches((prev) => {
       const nextMatches = prev.map((m) => {
         if (m.id === matchId) {
           const newMsg = {
-            id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            id: newMsgId,
             senderId: currentUserId,
             from: 'me' as const,
             text: cleanText,
@@ -484,15 +584,147 @@ export default function App() {
       });
       return nextMatches;
     });
+
+    // Mark as read for myself
+    setLastReadMessageIds((prev) => {
+      const updated = { ...prev, [matchId]: newMsgId };
+      try {
+        localStorage.setItem(`gigly_read_messages_${currentUserId}`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
   };
+
+  // Simulate text back from matched party (for easy on-demand notification testing)
+  const handleSimulateIncomingText = (matchId: number, customText?: string) => {
+    const defaultReplies = [
+      "Hey! Thanks for reaching out. I'd love to discuss this project!",
+      "Sounds great! What is your availability for a quick kickoff call?",
+      "Thanks for your message! Can you share a link to past work?",
+      "Awesome connecting with you. Let's discuss scope and timeline!",
+      "Received! I reviewed your details and I think it's a great match.",
+    ];
+    const replyText = customText || defaultReplies[Math.floor(Math.random() * defaultReplies.length)];
+
+    setMatches((prev) => {
+      const nextMatches = prev.map((m) => {
+        if (m.id === matchId) {
+          const partnerId = m.partnerUserId || `partner-${m.id}`;
+          const newMsg = {
+            id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            senderId: partnerId,
+            from: 'them' as const,
+            text: replyText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+          const updatedMessages = [...m.messages, newMsg];
+          syncMatchMessagesToFirestore(matchId, updatedMessages, currentUserId);
+          return {
+            ...m,
+            messages: updatedMessages,
+          };
+        }
+        return m;
+      });
+      return nextMatches;
+    });
+  };
+
+  // Helper to calculate unread incoming messages from the other person
+  const getMatchUnreadCount = (match: MatchRecord): number => {
+    if (!match.messages || match.messages.length === 0) return 0;
+    const lastReadId = lastReadMessageIds[match.id];
+    if (lastReadId) {
+      const lastReadIdx = match.messages.findIndex((m) => m.id === lastReadId);
+      if (lastReadIdx !== -1) {
+        return match.messages.slice(lastReadIdx + 1).filter((m) => {
+          return m.senderId ? m.senderId !== currentUserId : m.from === 'them';
+        }).length;
+      }
+    }
+    // If not read yet, count incoming messages from the other person
+    let unread = 0;
+    for (let i = match.messages.length - 1; i >= 0; i--) {
+      const m = match.messages[i];
+      const isIncoming = m.senderId ? m.senderId !== currentUserId : m.from === 'them';
+      if (isIncoming) {
+        unread++;
+      } else {
+        break; // Stop at message sent by current user
+      }
+    }
+    return unread;
+  };
+
+  // Calculate unread map per match and total unread texts
+  const unreadCountByMatch = useMemo(() => {
+    const map: Record<number, number> = {};
+    matches.forEach((m) => {
+      map[m.id] = getMatchUnreadCount(m);
+    });
+    return map;
+  }, [matches, lastReadMessageIds, currentUserId]);
+
+  const totalUnreadIncomingMessages = useMemo(() => {
+    return Object.values(unreadCountByMatch).reduce((acc: number, count: number) => acc + count, 0);
+  }, [unreadCountByMatch]);
+
+  // Real-time incoming text detection: Trigger toast notification & audio chime when someone texts back
+  const prevMatchesRef = useRef<MatchRecord[]>([]);
+  const isInitialMount = useRef(true);
+
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      prevMatchesRef.current = matches;
+      return;
+    }
+
+    matches.forEach((m) => {
+      const prev = prevMatchesRef.current.find((p) => p.id === m.id);
+      const prevCount = prev?.messages?.length || 0;
+      const currentCount = m.messages?.length || 0;
+
+      if (currentCount > prevCount) {
+        const newMsgs = m.messages.slice(prevCount);
+        const incomingMsgs = newMsgs.filter((msg) => {
+          return msg.senderId ? msg.senderId !== currentUserId : msg.from === 'them';
+        });
+
+        if (incomingMsgs.length > 0) {
+          const latestIncoming = incomingMsgs[incomingMsgs.length - 1];
+          const isActivelyViewingChat = currentScreen === 'messages' && activeChatId === m.id;
+
+          if (!isActivelyViewingChat) {
+            playNotificationChime();
+            setToastNotification({
+              id: latestIncoming.id,
+              matchId: m.id,
+              senderName: m.job.client,
+              text: latestIncoming.text,
+            });
+          }
+        }
+      }
+    });
+
+    prevMatchesRef.current = matches;
+  }, [matches, currentUserId, currentScreen, activeChatId]);
+
+  // Auto-dismiss toast notification after 6 seconds
+  useEffect(() => {
+    if (toastNotification) {
+      const timer = setTimeout(() => {
+        setToastNotification(null);
+      }, 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastNotification]);
 
   // Reshuffle Deck
   const handleReshuffle = () => {
     // Deck reshuffle resets viewed cards without injecting fake profiles
   };
-
-  // Count unread messages
-  const unreadMessagesCount = matches.filter((m) => m.messages.length === 0).length;
 
   // Guard Admin Dashboard access with verified admin session & route admin automatically
   useEffect(() => {
@@ -612,6 +844,7 @@ export default function App() {
                       return; // Pitch window closed
                     }
                     setActiveChatId(id);
+                    markChatAsRead(id);
                     setCurrentScreen('messages');
                   }}
                 />
@@ -631,8 +864,15 @@ export default function App() {
                   role={userRole}
                   activeChatId={activeChatId}
                   currentUserId={currentUserId}
-                  onSelectChat={(id) => setActiveChatId(id)}
+                  unreadCountByMatch={unreadCountByMatch}
+                  onSelectChat={(id) => {
+                    setActiveChatId(id);
+                    if (id !== null) {
+                      markChatAsRead(id);
+                    }
+                  }}
                   onSendMessage={handleSendMessage}
+                  onSimulateIncomingText={handleSimulateIncomingText}
                 />
               </motion.div>
             )}
@@ -678,10 +918,29 @@ export default function App() {
                   m.expiresAt > Date.now()
               ).length
             }
-            messagesBadgeCount={unreadMessagesCount}
+            messagesBadgeCount={totalUnreadIncomingMessages}
           />
         </div>
       )}
+
+      {/* IN-APP FLOATING NOTIFICATION TOAST WHEN SOMEONE TEXTS BACK */}
+      <AnimatePresence>
+        {toastNotification && (
+          <NotificationToast
+            key={toastNotification.id}
+            matchId={toastNotification.matchId}
+            senderName={toastNotification.senderName}
+            text={toastNotification.text}
+            onOpen={() => {
+              setActiveChatId(toastNotification.matchId);
+              markChatAsRead(toastNotification.matchId);
+              setCurrentScreen('messages');
+              setToastNotification(null);
+            }}
+            onDismiss={() => setToastNotification(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* MATCH POPUP OVERLAY */}
       <AnimatePresence>
@@ -697,6 +956,7 @@ export default function App() {
             onGoToChat={() => {
               if (matches.length > 0) {
                 setActiveChatId(matches[0].id);
+                markChatAsRead(matches[0].id);
               }
               setMatchedOverlayJob(null);
               setIsSuperLikeMatch(false);
