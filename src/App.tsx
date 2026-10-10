@@ -873,7 +873,6 @@ export default function App() {
           jobs={jobs}
           candidates={candidates}
           currency={currency}
-          onCurrencyChange={handleCurrencyChange}
         />
       )}
 
@@ -895,7 +894,6 @@ export default function App() {
                   matchesCount={matches.length}
                   swipedIds={swipedIds}
                   currency={currency}
-                  onCurrencyChange={handleCurrencyChange}
                   onSwipe={handleSwipe}
                   onReshuffle={() => {}}
                 />
@@ -914,7 +912,6 @@ export default function App() {
                   matches={matches}
                   role={userRole}
                   currency={currency}
-                  onCurrencyChange={handleCurrencyChange}
                   onOpenChat={(id) => {
                     const targetMatch = matches.find((m) => m.id === id);
                     if (
@@ -946,7 +943,6 @@ export default function App() {
                   activeChatId={activeChatId}
                   currentUserId={currentUserId}
                   currency={currency}
-                  onCurrencyChange={handleCurrencyChange}
                   unreadCountByMatch={unreadCountByMatch}
                   onSelectChat={(id) => {
                     setActiveChatId(id);

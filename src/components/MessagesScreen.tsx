@@ -15,8 +15,7 @@ import {
   MessageSquare,
   Lock,
 } from 'lucide-react';
-import { CurrencyDropdown } from './CurrencyDropdown';
-import { CurrencyInfo, formatWithCurrency } from '../lib/currency';
+import { formatWithCurrency } from '../lib/currency';
 import {
   FREELANCER_SUGGESTIONS,
   BUSINESS_SUGGESTIONS,
@@ -28,7 +27,6 @@ interface MessagesScreenProps {
   activeChatId: number | null;
   currentUserId?: string;
   currency?: string;
-  onCurrencyChange?: (curr: CurrencyInfo) => void;
   unreadCountByMatch?: Record<number, number>;
   onSelectChat: (id: number | null) => void;
   onSendMessage: (matchId: number, text: string) => void;
@@ -50,7 +48,6 @@ export function MessagesScreen({
   activeChatId,
   currentUserId,
   currency = '$',
-  onCurrencyChange,
   unreadCountByMatch,
   onSelectChat,
   onSendMessage,
@@ -302,13 +299,6 @@ export function MessagesScreen({
                           {viewingProfile.unit}
                         </span>
                       </span>
-                      {onCurrencyChange && (
-                        <CurrencyDropdown
-                          value={currency}
-                          onChange={onCurrencyChange}
-                          size="xs"
-                        />
-                      )}
                     </div>
                   </div>
                   <div className="text-right">
@@ -390,17 +380,8 @@ export function MessagesScreen({
   return (
     <div className="w-full flex flex-col">
       <header className="w-full mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="font-display font-[800] text-[26px] text-black tracking-tight flex items-center gap-1.5">
-            Gigly <span className="w-2.5 h-2.5 rounded-full bg-[#FFC629] border-[2px] border-black inline-block" />
-          </div>
-          {onCurrencyChange && (
-            <CurrencyDropdown
-              value={currency}
-              onChange={onCurrencyChange}
-              size="xs"
-            />
-          )}
+        <div className="font-display font-[800] text-[26px] text-black tracking-tight flex items-center gap-1.5 mb-2">
+          Gigly <span className="w-2.5 h-2.5 rounded-full bg-[#FFC629] border-[2px] border-black inline-block" />
         </div>
         <div className="flex items-center justify-between">
           <h2 className="font-display font-[800] text-[24px] text-black">Messages</h2>

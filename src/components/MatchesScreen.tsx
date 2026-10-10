@@ -12,14 +12,12 @@ import {
   ArrowRight,
   ShieldCheck,
 } from 'lucide-react';
-import { CurrencyDropdown } from './CurrencyDropdown';
-import { CurrencyInfo, formatWithCurrency } from '../lib/currency';
+import { formatWithCurrency } from '../lib/currency';
 
 interface MatchesScreenProps {
   matches: MatchRecord[];
   role: 'freelancer' | 'business';
   currency?: string;
-  onCurrencyChange?: (curr: CurrencyInfo) => void;
   onOpenChat: (matchId: number) => void;
 }
 
@@ -44,7 +42,6 @@ export function MatchesScreen({
   matches,
   role,
   currency = '$',
-  onCurrencyChange,
   onOpenChat,
 }: MatchesScreenProps) {
   const [currentTime, setCurrentTime] = useState<number>(() => Date.now());
@@ -70,17 +67,8 @@ export function MatchesScreen({
   return (
     <div className="w-full flex flex-col relative">
       <header className="w-full mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="font-display font-[800] text-[26px] text-black tracking-tight flex items-center gap-1.5">
-            Gigly <span className="w-2.5 h-2.5 rounded-full bg-[#FFC629] border-[2px] border-black inline-block" />
-          </div>
-          {onCurrencyChange && (
-            <CurrencyDropdown
-              value={currency}
-              onChange={onCurrencyChange}
-              size="xs"
-            />
-          )}
+        <div className="font-display font-[800] text-[26px] text-black tracking-tight flex items-center gap-1.5 mb-2">
+          Gigly <span className="w-2.5 h-2.5 rounded-full bg-[#FFC629] border-[2px] border-black inline-block" />
         </div>
         <h2 className="font-display font-[800] text-[24px] text-black">Your matches</h2>
         <p className="text-[13px] font-semibold text-[#6E6E6E]">
@@ -286,13 +274,6 @@ export function MatchesScreen({
                 <span className="px-3 py-1 bg-[#FFF9E6] border-[1.5px] border-black rounded-full text-[12px] font-extrabold text-black">
                   {formatWithCurrency(viewingProfile.job.rate, currency)} {viewingProfile.job.unit}
                 </span>
-                {onCurrencyChange && (
-                  <CurrencyDropdown
-                    value={currency}
-                    onChange={onCurrencyChange}
-                    size="xs"
-                  />
-                )}
                 <span className="px-3 py-1 bg-black text-[#FFC629] border-[1.5px] border-black rounded-full text-[12px] font-extrabold">
                   {viewingProfile.job.category}
                 </span>

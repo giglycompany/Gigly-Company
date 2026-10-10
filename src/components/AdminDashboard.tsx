@@ -4,8 +4,7 @@ import { ArrowLeft, Users, Briefcase, Eye, Flame, Shield, Search, ChevronUp, Che
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { GigItem, MatchRecord, UserProfile } from '../types';
-import { CurrencyDropdown } from './CurrencyDropdown';
-import { CurrencyInfo, formatWithCurrency } from '../lib/currency';
+import { formatWithCurrency } from '../lib/currency';
 
 interface AdminDashboardProps {
   onBackToApp: () => void;
@@ -14,7 +13,6 @@ interface AdminDashboardProps {
   jobs?: GigItem[];
   candidates?: GigItem[];
   currency?: string;
-  onCurrencyChange?: (curr: CurrencyInfo) => void;
 }
 
 export function AdminDashboard({
@@ -24,7 +22,6 @@ export function AdminDashboard({
   jobs = [],
   candidates = [],
   currency = '$',
-  onCurrencyChange,
 }: AdminDashboardProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
@@ -513,13 +510,6 @@ export function AdminDashboard({
                 className="pl-9 pr-3 py-1.5 bg-[#FFFCF5] border-[1.5px] border-black rounded-full text-[12px] font-semibold focus:outline-none focus:ring-2 focus:ring-[#FFC629]"
               />
             </div>
-            {onCurrencyChange && (
-              <CurrencyDropdown
-                value={currency}
-                onChange={onCurrencyChange}
-                size="xs"
-              />
-            )}
             <div className="flex items-center gap-1">
               <button
                 type="button"

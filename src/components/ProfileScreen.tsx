@@ -158,19 +158,10 @@ export function ProfileScreen({
         {!isEditing ? (
           <div className="space-y-4 pt-2">
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="block text-[11px] font-bold uppercase tracking-wider text-[#6E6E6E]">
-                  {profile.role === 'freelancer' ? 'Rate' : 'Typical Budget'}
-                </span>
-                <CurrencyDropdown
-                  value={selectedCurrency}
-                  onChange={handleCurrencyChange}
-                  size="xs"
-                />
-              </div>
-              <p className="text-[14px] font-semibold text-black">
-                {formatWithCurrency(profile.rateOrBudget, selectedCurrency)}
-              </p>
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-[#6E6E6E] mb-1">
+                {profile.role === 'freelancer' ? 'Rate' : 'Typical Budget'}
+              </span>
+              <p className="text-[14px] font-semibold text-black">{profile.rateOrBudget}</p>
             </div>
 
             <div>
